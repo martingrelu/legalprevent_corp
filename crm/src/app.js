@@ -73,6 +73,12 @@ function go(name, id = "") {
 }
 
 function render() {
+  if (!hasCrmAccess()) {
+    document.title = "Acceso privado | LegalPrevent CRM";
+    app.innerHTML = renderAuthGate();
+    return;
+  }
+
   const user = getCurrentUser(state);
   document.title = `LegalPrevent CRM - ${labelForView(view.name)}`;
   app.innerHTML = `
@@ -87,6 +93,38 @@ function render() {
     </div>
     <div id="modal-root"></div>
     <div id="toast" class="toast" role="status"></div>
+  `;
+}
+
+function hasCrmAccess() {
+  return Boolean(window.LegalPreventSupabase?.isConfigured?.() && window.LegalPreventSupabase?.getSession?.()?.access_token);
+}
+
+function renderAuthGate() {
+  return `
+    <main class="auth-gate">
+      <section class="auth-card">
+        <a class="brand" href="../" aria-label="LEGAL PREVENT inicio">
+          <span class="brand-mark">LP</span>
+          <span>
+            <strong>LegalPrevent</strong>
+            <small>CRM privado</small>
+          </span>
+        </a>
+        <div>
+          <p class="eyebrow">Acceso restringido</p>
+          <h1>CRM interno de Legal Prevent</h1>
+          <p>Inicia sesión con tu usuario autorizado para ver y sincronizar leads.</p>
+        </div>
+        <form class="auth-form" data-form="supabase-login">
+          <label>Email<input name="email" type="email" autocomplete="email" required /></label>
+          <label>Contraseña<input name="password" type="password" autocomplete="current-password" required /></label>
+          <button class="primary-button" type="submit">Entrar al CRM</button>
+        </form>
+        <p class="auth-note">El acceso al CRM no está disponible para visitantes de la web.</p>
+      </section>
+      <div id="toast" class="toast" role="status"></div>
+    </main>
   `;
 }
 
