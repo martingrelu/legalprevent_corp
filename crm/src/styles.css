@@ -223,6 +223,27 @@ select {
   gap: 20px;
 }
 
+.data-mode-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.data-mode-panel h2,
+.data-mode-panel p {
+  margin: 0;
+}
+
+.data-mode-panel p {
+  color: var(--muted);
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -533,6 +554,33 @@ tbody tr {
   font-size: 0.84rem;
   font-weight: 900;
   white-space: nowrap;
+}
+
+.danger-lite {
+  color: var(--red);
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.origin-pill {
+  display: inline-flex;
+  width: max-content;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.origin-pill.real {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.origin-pill.demo {
+  color: #64748b;
+  background: #e2e8f0;
 }
 
 .text-link {
@@ -1076,6 +1124,10 @@ pre {
   .modal-actions {
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .data-mode-panel {
+    display: grid;
   }
 
   .primary-button,

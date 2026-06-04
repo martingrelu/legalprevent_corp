@@ -211,6 +211,8 @@ function renderAccessDenied(permission) {
 function renderDashboard() {
   const metrics = dashboardMetrics(state);
   const alerts = buildAlerts(state);
+  const realLeadCount = state.leads.filter(isRealLead).length;
+  const demoLeadCount = state.leads.length - realLeadCount;
   const hotLeads = [...state.leads]
     .filter((lead) => !["Cliente ganado", "Perdido"].includes(lead.status))
     .sort((a, b) => leadScore(b) - leadScore(a))
@@ -222,6 +224,18 @@ function renderDashboard() {
 
   return `
     <div class="page-grid">
+      <section class="data-mode-panel">
+        <div>
+          <p class="eyebrow">Datos comerciales</p>
+          <h2>${realLeadCount} leads reales sincronizados</h2>
+          <p>${demoLeadCount ? `${demoLeadCount} leads demo siguen disponibles para pruebas.` : "Dashboard limpio, sin leads demo."}</p>
+        </div>
+        <div class="button-row">
+          <a class="secondary-button" href="#/leads?origin=real">Ver leads reales</a>
+          <button class="secondary-button" data-action="sync-supabase">Sincronizar Supabase</button>
+          ${demoLeadCount ? `<button class="ghost-button danger-lite" data-action="clear-demo-data">Limpiar demo</button>` : ""}
+        </div>
+      </section>
       <section class="metric-grid">
         ${metricCard("Total leads", metrics.totalLeads, "Oportunidades registradas")}
         ${metricCard("Leads nuevos", metrics.newLeads, "Ultimos 7 dias")}
@@ -382,6 +396,7 @@ function renderLeadFilters(filters) {
   return `
     <form class="filters" data-form="filters">
       <input name="query" value="${escapeAttr(filters.query || "")}" placeholder="Buscar empresa, contacto o email" />
+      ${selectField("origin", [["real", "Reales"], ["demo", "Demo"]], filters.origin, "Tipo", true)}
       ${selectField("status", LEAD_STATUSES, filters.status, "Estado", true)}
       ${selectField("source", LEAD_SOURCES, filters.source, "Fuente", true)}
       ${selectField("priority", PRIORITIES, filters.priority, "Prioridad", true)}
@@ -399,6 +414,7 @@ function renderLeadTableRow(lead) {
       <td>
         <strong>${escapeHtml(lead.companyName)}</strong>
         <small>${escapeHtml(lead.sector)} · ${lead.employees} empleados</small>
+        ${isRealLead(lead) ? `<span class="origin-pill real">Real</span>` : `<span class="origin-pill demo">Demo</span>`}
       </td>
       <td>${escapeHtml(lead.contactName)}<small>${escapeHtml(lead.email)}</small></td>
       <td>${badge(lead.status)}</td>
@@ -1150,6 +1166,7 @@ function handleClick(event) {
     render();
     showToast("Datos demo restaurados.");
   }
+  if (action === "clear-demo-data") clearDemoData();
   if (action === "export-backup") exportBackup();
   if (action === "open-import-backup") openModal(renderImportBackupModal());
   if (action === "open-supabase-login") openModal(renderSupabaseLoginModal());
@@ -1202,6 +1219,9 @@ async function syncSupabaseLeads() {
       const existingIndex = state.leads.findIndex((lead) => lead.email === row.email);
       const lead = {
         id: state.leads[existingIndex]?.id || `lead-${row.id}`,
+        supabaseId: row.id,
+        dataOrigin: "supabase",
+        externalSource: "supabase",
         companyName: row.company_name || `Lead web - ${row.email}`,
         contactName: row.contact_name || row.company_name || "Pendiente de completar",
         email: row.email || "",
@@ -1225,7 +1245,7 @@ async function syncSupabaseLeads() {
       };
 
       if (existingIndex >= 0) {
-        state.leads[existingIndex] = { ...state.leads[existingIndex], ...lead };
+        state.leads[existingIndex] = { ...state.leads[existingIndex], ...lead, dataOrigin: "supabase", externalSource: "supabase", supabaseId: row.id };
       } else {
         state.leads.unshift(lead);
         imported += 1;
@@ -1238,6 +1258,31 @@ async function syncSupabaseLeads() {
   } catch (error) {
     showToast(error.message || "No se pudo sincronizar Supabase.", "error");
   }
+}
+
+function isRealLead(lead) {
+  return lead?.dataOrigin === "supabase" || lead?.externalSource === "supabase" || Boolean(lead?.supabaseId);
+}
+
+function clearDemoData() {
+  const beforeLeads = state.leads.length;
+  const realLeadIds = new Set(state.leads.filter(isRealLead).map((lead) => lead.id));
+  state = {
+    ...state,
+    leads: state.leads.filter(isRealLead),
+    clients: [],
+    tasks: state.tasks.filter((task) => task.relatedType === "lead" && realLeadIds.has(task.relatedId)),
+    interactions: state.interactions.filter((item) => item.relatedType === "lead" && realLeadIds.has(item.relatedId)),
+    proposals: state.proposals.filter((item) => realLeadIds.has(item.relatedLeadId)),
+    documents: state.documents.filter((item) => item.relatedType === "lead" && realLeadIds.has(item.relatedId)),
+    payments: [],
+    activityLog: state.activityLog.filter((item) => item.entityType === "lead" && realLeadIds.has(item.entityId)),
+    alerts: [],
+  };
+  saveState(state);
+  state = applyAutomations(state);
+  render();
+  showToast(`${beforeLeads - state.leads.length} leads demo eliminados. Datos reales conservados.`);
 }
 
 function exportBackup() {

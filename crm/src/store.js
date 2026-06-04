@@ -607,18 +607,23 @@ export function logActivity(state, entityType, entityId, action, detail) {
 export function filteredLeads(state, filters) {
   return state.leads.filter((lead) => {
     const query = filters.query?.toLowerCase() || "";
+    const isReal = lead.dataOrigin === "supabase" || lead.externalSource === "supabase" || Boolean(lead.supabaseId);
     const matchesQuery =
       !query ||
       lead.companyName.toLowerCase().includes(query) ||
       lead.contactName.toLowerCase().includes(query) ||
       lead.email.toLowerCase().includes(query);
+    const matchesOrigin =
+      !filters.origin ||
+      (filters.origin === "real" && isReal) ||
+      (filters.origin === "demo" && !isReal);
     const matchesStatus = !filters.status || lead.status === filters.status;
     const matchesSector = !filters.sector || lead.sector === filters.sector;
     const matchesSource = !filters.source || lead.source === filters.source;
     const matchesPriority = !filters.priority || lead.priority === filters.priority;
     const matchesOwner = !filters.ownerId || lead.ownerId === filters.ownerId;
     const matchesPlan = !filters.plan || lead.recommendedPlan === filters.plan;
-    return matchesQuery && matchesStatus && matchesSector && matchesSource && matchesPriority && matchesOwner && matchesPlan;
+    return matchesQuery && matchesOrigin && matchesStatus && matchesSector && matchesSource && matchesPriority && matchesOwner && matchesPlan;
   });
 }
 
