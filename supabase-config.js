@@ -1,4 +1,4 @@
 window.LEGAL_PREVENT_SUPABASE = {
-  url: "",
-  anonKey: ""
+  url: "https://wtpfrlsbfishvworjdtr.supabase.co",
+  anonKey: "sb_publishable_BRJrc6LKobezOSRGe8hh3w_sNHkTgvH"
 };
