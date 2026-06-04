@@ -40,6 +40,23 @@ export function saveState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+export function createBackup(state) {
+  return {
+    app: "LegalPrevent CRM",
+    storageKey: STORAGE_KEY,
+    exportedAt: new Date().toISOString(),
+    schemaVersion: 1,
+    data: clone(state),
+  };
+}
+
+export function importBackup(backup) {
+  const nextState = backup?.data || backup;
+  validateBackupState(nextState);
+  saveState(nextState);
+  return nextState;
+}
+
 export function resetState() {
   const seeded = clone(demoData);
   seeded.meta = {
@@ -48,6 +65,23 @@ export function resetState() {
   };
   saveState(seeded);
   return seeded;
+}
+
+function validateBackupState(nextState) {
+  const requiredCollections = ["users", "leads", "clients", "tasks", "interactions", "proposals", "documents", "payments", "activityLog"];
+  if (!nextState || typeof nextState !== "object") {
+    throw new Error("La copia no tiene un formato valido.");
+  }
+
+  requiredCollections.forEach((key) => {
+    if (!Array.isArray(nextState[key])) {
+      throw new Error(`La copia no incluye la seccion obligatoria: ${key}.`);
+    }
+  });
+
+  if (!nextState.currentUserId) {
+    throw new Error("La copia no incluye el usuario actual del CRM.");
+  }
 }
 
 export function createId(prefix) {

@@ -17,6 +17,7 @@ import {
   buildAlerts,
   canAccess,
   convertLeadToClient,
+  createBackup,
   dashboardMetrics,
   filteredClients,
   filteredLeads,
@@ -25,6 +26,7 @@ import {
   formatDateTime,
   getCurrentUser,
   getEntityName,
+  importBackup,
   isOverdue,
   leadScore,
   loadState,
@@ -146,6 +148,8 @@ function renderTopbar(user) {
               .join("")}
           </select>
         </label>
+        <button class="secondary-button" data-action="export-backup">Exportar copia</button>
+        <button class="secondary-button" data-action="open-import-backup">Importar copia</button>
         <button class="ghost-button" data-action="reset-demo">Restaurar demo</button>
         <button class="primary-button" data-action="open-lead-modal">Nuevo lead</button>
       </div>
@@ -1003,12 +1007,37 @@ function renderProposalModal(proposal = null, relatedType = "lead", relatedId = 
   );
 }
 
+function renderImportBackupModal() {
+  return modal(
+    "Importar copia del CRM",
+    `
+      <form class="modal-form" data-form="import-backup">
+        <div class="backup-box">
+          <strong>Antes de importar, guarda una copia actual.</strong>
+          <p>La importacion sustituira los datos que tienes ahora en este navegador por los del archivo seleccionado.</p>
+        </div>
+        <label class="full-field">Archivo de copia
+          <input name="backupFile" type="file" accept="application/json,.json" required />
+        </label>
+        <label class="check-field">
+          <input type="checkbox" name="confirmImport" required />
+          Entiendo que esta accion reemplazara los datos actuales del CRM.
+        </label>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
+          <button class="primary-button" type="submit">Importar copia</button>
+        </div>
+      </form>
+    `,
+  );
+}
+
 function relationOptions(type) {
   if (type === "client") return state.clients.map((client) => [client.id, client.businessName]);
   return state.leads.map((lead) => [lead.id, lead.companyName]);
 }
 
-function handleSubmit(event) {
+async function handleSubmit(event) {
   const form = event.target;
   const formType = form.dataset.form;
   if (!formType) return;
@@ -1024,6 +1053,22 @@ function handleSubmit(event) {
       window.location.hash = `#/${view.name}${clean.toString() ? `?${clean.toString()}` : ""}`;
       view = parseRoute();
       render();
+      return;
+    }
+
+    if (formType === "import-backup") {
+      const file = form.elements.backupFile.files[0];
+      if (!file) throw new Error("Selecciona un archivo de copia.");
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch {
+        throw new Error("El archivo seleccionado no es una copia JSON valida.");
+      }
+      state = applyAutomations(importBackup(backup));
+      closeModal();
+      render();
+      showToast("Copia importada correctamente.");
       return;
     }
 
@@ -1063,6 +1108,8 @@ function handleClick(event) {
     render();
     showToast("Datos demo restaurados.");
   }
+  if (action === "export-backup") exportBackup();
+  if (action === "open-import-backup") openModal(renderImportBackupModal());
   if (action === "close-modal") closeModal();
   if (action === "open-lead-modal") openModal(renderLeadModal(state.leads.find((lead) => lead.id === button.dataset.id)));
   if (action === "open-client-modal") {
@@ -1094,6 +1141,21 @@ function handleClick(event) {
       showToast("Propuesta aceptada y lead convertido.");
     }
   }
+}
+
+function exportBackup() {
+  const backup = createBackup(state);
+  const date = new Date().toISOString().slice(0, 10);
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `legalprevent-crm-copia-${date}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("Copia de seguridad descargada.");
 }
 
 function handleChange(event) {
