@@ -124,7 +124,8 @@ const state = {
   company: {},
   answers: {},
   result: null,
-  source: "direct_diagnostic"
+  source: "direct_diagnostic",
+  crmLeadId: ""
 };
 
 if (diagnosticApp) {
@@ -380,6 +381,172 @@ if (diagnosticApp) {
     createdAt: new Date().toISOString()
   });
 
+  const parseEmployees = (value) => {
+    if (value === "1-10") return 10;
+    if (value === "11-50") return 50;
+    if (value === "51-250") return 250;
+    if (value === "Más de 250") return 251;
+    return Number(value || 0);
+  };
+
+  const recommendedPlanFromResult = (result, employees) => {
+    const count = parseEmployees(employees);
+    if (count > 250) return "Personalizado";
+    if (result.globalScore < 50 || count > 50) return "Premium";
+    if (count > 10) return "Pro";
+    return "Starter";
+  };
+
+  const monthlyRevenueFromPlan = (plan) => {
+    if (plan === "Starter") return 29;
+    if (plan === "Pro") return 79;
+    if (plan === "Premium") return 149;
+    return 590;
+  };
+
+  const priorityFromResult = (result) => {
+    if (result.globalScore < 50 || result.criticalAreas.length >= 3) return "Alta";
+    if (result.globalScore < 75 || result.criticalAreas.length >= 1) return "Media";
+    return "Baja";
+  };
+
+  const createCrmId = (prefix) =>
+    `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+  const loadCrmState = () => {
+    try {
+      return JSON.parse(localStorage.getItem("legalprevent-crm-v1") || "null");
+    } catch {
+      return null;
+    }
+  };
+
+  const saveLeadToCrm = () => {
+    const result = state.result;
+    if (!result) return null;
+
+    const now = new Date();
+    const nextActionAt = new Date(now);
+    nextActionAt.setDate(nextActionAt.getDate() + 1);
+
+    const plan = recommendedPlanFromResult(result, state.company.employees);
+    const leadId = state.crmLeadId || createCrmId("lead");
+    const ownerId = "u-2";
+    const riskScore = 100 - result.globalScore;
+    const lead = {
+      id: leadId,
+      companyName: state.company.company,
+      contactName: state.company.company,
+      email: state.company.email,
+      phone: state.company.phone,
+      sector: state.company.sector,
+      employees: parseEmployees(state.company.employees),
+      city: "",
+      source: "Web",
+      status: "Interesado",
+      priority: priorityFromResult(result),
+      createdAt: now.toISOString(),
+      lastInteractionAt: now.toISOString(),
+      nextActionAt: nextActionAt.toISOString(),
+      nextAction: "Contactar para revisar diagnóstico y agendar demo.",
+      notes: [
+        `Lead generado desde diagnóstico web (${state.source}).`,
+        `Cumplimiento: ${result.globalScore}/100 (${result.classification.label}).`,
+        `Áreas críticas: ${result.criticalAreas.map((item) => `${item.area} ${item.score}/100`).join(", ") || "Sin áreas críticas"}.`,
+        `Prioridades: ${result.priorities.join(" | ")}`
+      ].join("\n"),
+      ownerId,
+      recommendedPlan: plan,
+      estimatedMonthlyRevenue: monthlyRevenueFromPlan(plan),
+      riskScore
+    };
+
+    const crmState = loadCrmState() || {
+      users: [
+        { id: "u-1", name: "Marta Ruiz", email: "marta@legalprevent.com", role: "admin" },
+        { id: "u-2", name: "Alvaro Navas", email: "alvaro@legalprevent.com", role: "sales" }
+      ],
+      currentUserId: "u-1",
+      leads: [],
+      clients: [],
+      tasks: [],
+      interactions: [],
+      proposals: [],
+      payments: [],
+      documents: [],
+      notes: [],
+      activityLog: [],
+      alerts: [],
+      meta: { seededAt: now.toISOString(), version: 1, source: "legalprevent_web_bridge" }
+    };
+
+    crmState.leads = crmState.leads || [];
+    crmState.interactions = crmState.interactions || [];
+    crmState.tasks = crmState.tasks || [];
+    crmState.documents = crmState.documents || [];
+    crmState.activityLog = crmState.activityLog || [];
+
+    const existingIndex = crmState.leads.findIndex(
+      (item) => item.email === lead.email && item.companyName === lead.companyName
+    );
+
+    if (existingIndex >= 0) {
+      lead.id = crmState.leads[existingIndex].id;
+      lead.createdAt = crmState.leads[existingIndex].createdAt || lead.createdAt;
+      crmState.leads[existingIndex] = { ...crmState.leads[existingIndex], ...lead };
+      state.crmLeadId = lead.id;
+    } else {
+      crmState.leads.unshift(lead);
+      state.crmLeadId = lead.id;
+    }
+
+    crmState.interactions.unshift({
+      id: createCrmId("int"),
+      type: "Nota manual",
+      relatedType: "lead",
+      relatedId: lead.id,
+      date: now.toISOString(),
+      description: `Diagnóstico completado: ${result.globalScore}/100, clasificación ${result.classification.label}.`,
+      createdBy: ownerId
+    });
+
+    crmState.tasks.unshift({
+      id: createCrmId("task"),
+      title: `Contactar a ${lead.companyName}`,
+      description: "Lead captado desde el diagnóstico web. Revisar informe y proponer demo.",
+      relatedType: "lead",
+      relatedId: lead.id,
+      dueDate: nextActionAt.toISOString(),
+      priority: lead.priority,
+      status: "Pendiente",
+      ownerId
+    });
+
+    crmState.documents.unshift({
+      id: createCrmId("doc"),
+      relatedType: "lead",
+      relatedId: lead.id,
+      name: "Informe de diagnóstico inicial",
+      type: "diagnostic",
+      createdAt: now.toISOString()
+    });
+
+    crmState.activityLog.unshift({
+      id: createCrmId("log"),
+      entityType: "lead",
+      entityId: lead.id,
+      action: existingIndex >= 0 ? "diagnostic_update" : "diagnostic_create",
+      detail: `Lead ${existingIndex >= 0 ? "actualizado" : "creado"} desde diagnóstico web.`,
+      createdAt: now.toISOString(),
+      createdBy: ownerId
+    });
+
+    localStorage.setItem("legalprevent-crm-v1", JSON.stringify(crmState));
+    sessionStorage.setItem("lp_last_crm_lead_id", lead.id);
+    console.info("LEGAL PREVENT CRM lead saved", lead);
+    return lead;
+  };
+
   const escapePdfText = (value) =>
     String(value)
       .replace(/\\/g, "\\\\")
@@ -470,7 +637,8 @@ if (diagnosticApp) {
     }
     const result = calculateResult();
     renderResult(result);
-    console.info("LEGAL PREVENT diagnostic payload", buildPayload());
+    const crmLead = saveLeadToCrm();
+    console.info("LEGAL PREVENT diagnostic payload", { ...buildPayload(), crmLead });
     showStep(3);
   });
 
@@ -485,6 +653,7 @@ if (diagnosticApp) {
     if (feedback) feedback.textContent = "Informe preparado para descarga. En producción se conectará a generación PDF avanzada.";
   });
   document.querySelector("[data-demo-request]")?.addEventListener("click", () => {
-    console.info("LEGAL PREVENT demo request from diagnostic", buildPayload());
+    const crmLead = saveLeadToCrm();
+    console.info("LEGAL PREVENT demo request from diagnostic", { ...buildPayload(), crmLead });
   });
 }
