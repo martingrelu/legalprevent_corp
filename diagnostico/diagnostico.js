@@ -638,6 +638,19 @@ if (diagnosticApp) {
     const result = calculateResult();
     renderResult(result);
     const crmLead = saveLeadToCrm();
+    window.LegalPreventSupabase?.createLead({
+      eventType: "diagnostic_completed",
+      leadStage: "qualified_diagnostic_completed",
+      payload: buildPayload(),
+      crmLead,
+      page: window.location.href
+    });
+    window.LegalPreventSupabase?.createDiagnostic({
+      eventType: "diagnostic_completed",
+      payload: buildPayload(),
+      crmLead,
+      page: window.location.href
+    });
     console.info("LEGAL PREVENT diagnostic payload", { ...buildPayload(), crmLead });
     showStep(3);
   });
@@ -654,6 +667,13 @@ if (diagnosticApp) {
   });
   document.querySelector("[data-demo-request]")?.addEventListener("click", () => {
     const crmLead = saveLeadToCrm();
+    window.LegalPreventSupabase?.createLead({
+      eventType: "diagnostic_demo_requested",
+      leadStage: "diagnostic_to_demo",
+      payload: buildPayload(),
+      crmLead,
+      page: window.location.href
+    });
     console.info("LEGAL PREVENT demo request from diagnostic", { ...buildPayload(), crmLead });
   });
 }

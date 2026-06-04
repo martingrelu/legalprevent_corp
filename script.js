@@ -358,7 +358,7 @@ const saveDemoLeadToCrm = (payload) => {
 };
 
 document.querySelectorAll("form[data-form]").forEach((form) => {
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (!form.reportValidity()) return;
@@ -393,6 +393,13 @@ document.querySelectorAll("form[data-form]").forEach((form) => {
     }
 
     const crmLead = saveDemoLeadToCrm(payload);
+    await window.LegalPreventSupabase?.createLead({
+      eventType: "demo_requested",
+      leadStage: "demo_requested_from_landing",
+      lead: crmLead,
+      form: payload,
+      page: window.location.href
+    });
     console.info("LEGAL PREVENT CRM demo lead saved", crmLead);
 
     const feedback = form.querySelector(".form-feedback");

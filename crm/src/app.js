@@ -133,6 +133,9 @@ function renderSidebar(user) {
 
 function renderTopbar(user) {
   const alerts = buildAlerts(state);
+  const supabase = window.LegalPreventSupabase;
+  const supabaseConfigured = supabase?.isConfigured?.();
+  const supabaseSession = supabase?.getSession?.();
   return `
     <header class="topbar">
       <div>
@@ -148,6 +151,14 @@ function renderTopbar(user) {
               .join("")}
           </select>
         </label>
+        ${
+          supabaseConfigured
+            ? supabaseSession
+              ? `<button class="secondary-button" data-action="sync-supabase">Sincronizar Supabase</button>
+                 <button class="ghost-button" data-action="supabase-logout">Cerrar Supabase</button>`
+              : `<button class="secondary-button" data-action="open-supabase-login">Conectar Supabase</button>`
+            : `<span class="sync-status">Supabase pendiente</span>`
+        }
         <button class="secondary-button" data-action="export-backup">Exportar copia</button>
         <button class="secondary-button" data-action="open-import-backup">Importar copia</button>
         <button class="ghost-button" data-action="reset-demo">Restaurar demo</button>
@@ -1032,6 +1043,28 @@ function renderImportBackupModal() {
   );
 }
 
+function renderSupabaseLoginModal() {
+  return modal(
+    "Conectar Supabase",
+    `
+      <form class="modal-form" data-form="supabase-login">
+        <div class="backup-box">
+          <strong>Acceso a leads centrales</strong>
+          <p>Introduce el usuario creado en Supabase Auth para sincronizar los leads captados desde la web.</p>
+        </div>
+        <div class="form-grid">
+          ${inputField("email", "Email", "", "email")}
+          ${inputField("password", "Contraseña", "", "password")}
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
+          <button class="primary-button" type="submit">Conectar</button>
+        </div>
+      </form>
+    `,
+  );
+}
+
 function relationOptions(type) {
   if (type === "client") return state.clients.map((client) => [client.id, client.businessName]);
   return state.leads.map((lead) => [lead.id, lead.companyName]);
@@ -1069,6 +1102,15 @@ async function handleSubmit(event) {
       closeModal();
       render();
       showToast("Copia importada correctamente.");
+      return;
+    }
+
+    if (formType === "supabase-login") {
+      const formData = new FormData(form);
+      await window.LegalPreventSupabase.signIn(formData.get("email"), formData.get("password"));
+      closeModal();
+      render();
+      showToast("Supabase conectado.");
       return;
     }
 
@@ -1110,6 +1152,13 @@ function handleClick(event) {
   }
   if (action === "export-backup") exportBackup();
   if (action === "open-import-backup") openModal(renderImportBackupModal());
+  if (action === "open-supabase-login") openModal(renderSupabaseLoginModal());
+  if (action === "sync-supabase") syncSupabaseLeads();
+  if (action === "supabase-logout") {
+    window.LegalPreventSupabase?.signOut();
+    render();
+    showToast("Sesión de Supabase cerrada.");
+  }
   if (action === "close-modal") closeModal();
   if (action === "open-lead-modal") openModal(renderLeadModal(state.leads.find((lead) => lead.id === button.dataset.id)));
   if (action === "open-client-modal") {
@@ -1140,6 +1189,54 @@ function handleClick(event) {
       render();
       showToast("Propuesta aceptada y lead convertido.");
     }
+  }
+}
+
+async function syncSupabaseLeads() {
+  try {
+    const rows = await window.LegalPreventSupabase.fetchLeads();
+    const now = new Date().toISOString();
+    let imported = 0;
+
+    rows.forEach((row) => {
+      const existingIndex = state.leads.findIndex((lead) => lead.email === row.email);
+      const lead = {
+        id: state.leads[existingIndex]?.id || `lead-${row.id}`,
+        companyName: row.company_name || `Lead web - ${row.email}`,
+        contactName: row.contact_name || row.company_name || "Pendiente de completar",
+        email: row.email || "",
+        phone: row.phone || "",
+        sector: row.sector || "Pendiente",
+        employees: row.employees || "",
+        city: "",
+        source: "Web",
+        status: row.status || "Nuevo",
+        priority: row.priority || "Media",
+        createdAt: row.created_at || now,
+        lastInteractionAt: row.created_at || now,
+        nextActionAt: row.next_action_at || now,
+        nextAction: "Contactar lead captado desde la web.",
+        notes: `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
+        ownerId: getCurrentUser(state).id,
+        recommendedPlan: row.recommended_plan || "Pro",
+        estimatedMonthlyRevenue: row.recommended_plan === "Starter" ? 29 : row.recommended_plan === "Business" ? 149 : 79,
+        riskScore: row.risk_score || 0,
+        convertedClientId: "",
+      };
+
+      if (existingIndex >= 0) {
+        state.leads[existingIndex] = { ...state.leads[existingIndex], ...lead };
+      } else {
+        state.leads.unshift(lead);
+        imported += 1;
+      }
+    });
+
+    saveState(state);
+    render();
+    showToast(imported ? `${imported} leads nuevos sincronizados.` : "Leads centrales ya sincronizados.");
+  } catch (error) {
+    showToast(error.message || "No se pudo sincronizar Supabase.", "error");
   }
 }
 
