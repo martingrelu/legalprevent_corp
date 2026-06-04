@@ -397,8 +397,10 @@ document.querySelectorAll("form[data-form]").forEach((form) => {
 
     const feedback = form.querySelector(".form-feedback");
     if (feedback) {
-      feedback.textContent = "Solicitud recibida. Te contactaremos muy pronto para agendar la demostración.";
+      feedback.textContent = "Solicitud recibida. Te llevamos a la confirmación...";
     }
-    form.reset();
+    window.setTimeout(() => {
+      window.location.href = "./gracias/?origen=demo";
+    }, 650);
   });
 });

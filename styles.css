@@ -1460,6 +1460,18 @@ h1 {
   .pricing-strip {
     padding: 1.25rem;
   }
+
+  .thank-you-page {
+    padding-top: 92px;
+  }
+
+  .thank-you-card {
+    padding: 34px 20px;
+  }
+
+  .thank-you-steps {
+    grid-template-columns: 1fr;
+  }
 }
 
 section:not(.hero) {
@@ -1537,6 +1549,75 @@ select {
   color: #047857;
   font-size: 0.86rem;
   font-weight: 800;
+}
+
+.thank-you-page {
+  padding: 118px 0 72px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(30, 94, 255, 0.14), transparent 34%),
+    linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.thank-you-card {
+  display: grid;
+  gap: 24px;
+  max-width: 980px;
+  padding: 58px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.9)),
+    #ffffff;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.12);
+}
+
+.thank-you-card h1 {
+  max-width: 780px;
+  margin: 0;
+  color: var(--blue-dark);
+  font-size: clamp(2.4rem, 5vw, 4.9rem);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.thank-you-card p {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.12rem;
+}
+
+.thank-you-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.thank-you-steps article {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 86px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.thank-you-steps strong {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.thank-you-steps span {
+  color: var(--blue-dark);
+  font-weight: 900;
 }
 
 .contact-form {
