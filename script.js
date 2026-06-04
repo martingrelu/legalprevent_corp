@@ -239,6 +239,124 @@ document.querySelectorAll("[data-cookie-save]").forEach((button) => {
   });
 });
 
+const createCrmId = (prefix) =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+const getEmailCompany = (email) => {
+  const domain = String(email || "").split("@")[1]?.split(".")[0] || "empresa";
+  return domain.charAt(0).toUpperCase() + domain.slice(1);
+};
+
+const loadCrmState = () => {
+  try {
+    return JSON.parse(localStorage.getItem("legalprevent-crm-v1") || "null");
+  } catch {
+    return null;
+  }
+};
+
+const saveDemoLeadToCrm = (payload) => {
+  const now = new Date().toISOString();
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const email = String(payload.email || "").trim().toLowerCase();
+  const leadId = createCrmId("lead");
+  const userId = "u-1";
+
+  const crmState = loadCrmState() || {
+    currentUserId: userId,
+    users: [{ id: userId, name: "Legal Prevent", email: "legal@legalprevent.com", role: "admin" }],
+    leads: [],
+    clients: [],
+    tasks: [],
+    interactions: [],
+    proposals: [],
+    documents: [],
+    payments: [],
+    activityLog: [],
+    alerts: [],
+    meta: { seededAt: now, version: 1 }
+  };
+
+  crmState.leads = crmState.leads || [];
+  crmState.tasks = crmState.tasks || [];
+  crmState.interactions = crmState.interactions || [];
+  crmState.activityLog = crmState.activityLog || [];
+
+  const existingIndex = crmState.leads.findIndex((lead) => String(lead.email || "").toLowerCase() === email);
+  const existingLead = crmState.leads[existingIndex];
+  const nextLead = {
+    id: existingLead?.id || leadId,
+    companyName: existingLead?.companyName || `Lead web - ${getEmailCompany(email)}`,
+    contactName: existingLead?.contactName || "Pendiente de completar",
+    email,
+    phone: existingLead?.phone || "",
+    sector: existingLead?.sector || "Pendiente",
+    employees: existingLead?.employees || "",
+    city: existingLead?.city || "",
+    source: "Web",
+    status: "Demo agendada",
+    priority: "Alta",
+    createdAt: existingLead?.createdAt || now,
+    lastInteractionAt: now,
+    nextActionAt: tomorrow,
+    nextAction: "Contactar para agendar demostración.",
+    notes: [
+      existingLead?.notes,
+      `Solicitud de demostración enviada desde la web el ${new Date(now).toLocaleString("es-ES")}.`,
+      payload.commercial ? "Acepta comunicaciones comerciales." : "No acepta comunicaciones comerciales."
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    ownerId: existingLead?.ownerId || crmState.currentUserId || userId,
+    recommendedPlan: existingLead?.recommendedPlan || "Pro",
+    estimatedMonthlyRevenue: existingLead?.estimatedMonthlyRevenue || 79,
+    riskScore: existingLead?.riskScore || 65,
+    convertedClientId: existingLead?.convertedClientId || ""
+  };
+
+  if (existingIndex >= 0) {
+    crmState.leads[existingIndex] = { ...existingLead, ...nextLead };
+  } else {
+    crmState.leads.unshift(nextLead);
+  }
+
+  crmState.interactions.unshift({
+    id: createCrmId("int"),
+    type: "Demo",
+    relatedType: "lead",
+    relatedId: nextLead.id,
+    description: "Solicitud de demostración captada desde la web corporativa.",
+    date: now,
+    createdBy: nextLead.ownerId
+  });
+
+  crmState.tasks.unshift({
+    id: createCrmId("task"),
+    title: `Contactar a ${nextLead.companyName}`,
+    description: "Lead captado desde el CTA final de la web. Confirmar datos y agendar demo.",
+    relatedType: "lead",
+    relatedId: nextLead.id,
+    dueDate: tomorrow,
+    priority: "Alta",
+    status: "Pendiente",
+    ownerId: nextLead.ownerId
+  });
+
+  crmState.activityLog.unshift({
+    id: createCrmId("log"),
+    entityType: "lead",
+    entityId: nextLead.id,
+    action: "web_demo_requested",
+    detail: "Solicitud de demostración guardada en CRM desde la web.",
+    createdAt: now,
+    createdBy: nextLead.ownerId
+  });
+
+  localStorage.setItem("legalprevent-crm-v1", JSON.stringify(crmState));
+  sessionStorage.setItem("lp_last_crm_lead_id", nextLead.id);
+  return nextLead;
+};
+
 document.querySelectorAll("form[data-form]").forEach((form) => {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -274,12 +392,13 @@ document.querySelectorAll("form[data-form]").forEach((form) => {
       return;
     }
 
+    const crmLead = saveDemoLeadToCrm(payload);
+    console.info("LEGAL PREVENT CRM demo lead saved", crmLead);
+
     const feedback = form.querySelector(".form-feedback");
     if (feedback) {
-      feedback.textContent =
-        form.dataset.form === "diagnostico"
-          ? "Diagnóstico preparado. En producción este lead se enviará al CRM y generará el flujo automático."
-          : "Solicitud preparada. En producción se enviará al CRM comercial.";
+      feedback.textContent = "Solicitud recibida. Te contactaremos muy pronto para agendar la demostración.";
     }
+    form.reset();
   });
 });
