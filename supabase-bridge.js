@@ -76,6 +76,29 @@
     };
   };
 
+  const sendLeadEmail = async (input, leadRecord) => {
+    if (!isConfigured()) return { ok: false, configured: false };
+
+    try {
+      const response = await fetch(`${cleanBaseUrl()}/functions/v1/send-lead-email`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+          ...input,
+          lead: leadRecord || input.lead || {},
+          page: input.page || window.location.href
+        })
+      });
+
+      if (!response.ok) throw new Error(await response.text());
+      return { ok: true, result: await response.json() };
+    } catch (error) {
+      savePending({ input, leadRecord }, "email_function_failed");
+      console.warn("No se pudo enviar el email automático", error);
+      return { ok: false, error };
+    }
+  };
+
   const createLead = async (input) => {
     const record = buildLeadRecord(input);
     if (!isConfigured()) {
@@ -88,7 +111,9 @@
         method: "POST",
         body: JSON.stringify({ p_payload: record })
       });
-      return { ok: true, configured: true, record: row || record };
+      const savedRecord = row || record;
+      const email = await sendLeadEmail(input, savedRecord);
+      return { ok: true, configured: true, record: savedRecord, email };
     } catch (error) {
       savePending(record, "supabase_insert_failed");
       console.warn("No se pudo enviar el lead a Supabase", error);
@@ -165,6 +190,7 @@
     isConfigured,
     createLead,
     createDiagnostic,
+    sendLeadEmail,
     signIn,
     signOut,
     getSession,

@@ -36,3 +36,48 @@ Usa solo la clave pública `anon`. No pegues nunca la `service_role` en la web.
 - Visitantes anónimos solo pueden ejecutar funciones de alta de leads e informes.
 - Solo usuarios autenticados pueden leer y actualizar leads.
 - La clave privada `service_role` debe quedarse fuera del frontend.
+
+## 6. Emails automáticos
+
+La web está preparada para llamar a la Edge Function `send-lead-email` después de crear cada lead.
+
+### Proveedor recomendado
+
+Usa Resend para emails transaccionales.
+
+1. Crea cuenta en Resend.
+2. Verifica el dominio `legalprevent.com`.
+3. Crea una API key.
+
+### Secretos en Supabase
+
+En Supabase, añade estos secretos en `Project Settings` > `Edge Functions` > `Secrets`:
+
+```text
+RESEND_API_KEY=TU_API_KEY_DE_RESEND
+LEAD_NOTIFY_EMAIL=tu-email-interno@legalprevent.com
+FROM_EMAIL=Legal Prevent <noreply@legalprevent.com>
+PUBLIC_SITE_URL=https://legalprevent.com
+```
+
+No pongas `RESEND_API_KEY` en la web ni en GitHub.
+
+### Despliegue
+
+Desde una carpeta con Supabase CLI:
+
+```bash
+supabase functions deploy send-lead-email --project-ref wtpfrlsbfishvworjdtr
+```
+
+La función está en:
+
+```text
+supabase/functions/send-lead-email/index.ts
+```
+
+### Flujo de email
+
+- Email interno: avisa de un nuevo lead.
+- Email al lead: confirma que la solicitud se ha recibido.
+- Si el email falla, la captación no se bloquea: el lead sigue entrando en Supabase.
