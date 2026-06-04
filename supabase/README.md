@@ -39,7 +39,7 @@ Usa solo la clave pública `anon`. No pegues nunca la `service_role` en la web.
 
 ## 6. Emails automáticos
 
-La web está preparada para llamar a la Edge Function `send-lead-email` después de crear cada lead.
+La web está preparada para llamar a la Edge Function `smooth-action` después de crear cada lead.
 
 ### Proveedor recomendado
 
@@ -67,7 +67,7 @@ No pongas `RESEND_API_KEY` en la web ni en GitHub.
 Desde una carpeta con Supabase CLI:
 
 ```bash
-supabase functions deploy send-lead-email --project-ref wtpfrlsbfishvworjdtr
+supabase functions deploy smooth-action --project-ref wtpfrlsbfishvworjdtr
 ```
 
 La función está en:
@@ -75,6 +75,8 @@ La función está en:
 ```text
 supabase/functions/send-lead-email/index.ts
 ```
+
+En la configuración de Supabase, deja `Verify JWT with legacy secret` en OFF para esta función pública de envío controlado.
 
 ### Flujo de email
 

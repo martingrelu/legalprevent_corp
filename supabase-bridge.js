@@ -80,7 +80,7 @@
     if (!isConfigured()) return { ok: false, configured: false };
 
     try {
-      const response = await fetch(`${cleanBaseUrl()}/functions/v1/send-lead-email`, {
+      const response = await fetch(`${cleanBaseUrl()}/functions/v1/smooth-action`, {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({
