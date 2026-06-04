@@ -27,12 +27,12 @@ Usa solo la clave pública `anon`. No pegues nunca la `service_role` en la web.
 
 ## 4. Flujo
 
-- La landing inserta leads en `public.leads`.
-- El diagnóstico inserta leads en `public.leads` e informes en `public.diagnostics`.
+- La landing llama a la función segura `submit_lead`, que crea registros en `public.leads`.
+- El diagnóstico llama a `submit_lead` y `submit_diagnostic`.
 - El CRM permite iniciar sesión con Supabase Auth y sincronizar los leads centrales.
 
 ## 5. Seguridad
 
-- Visitantes anónimos solo pueden crear leads e informes.
+- Visitantes anónimos solo pueden ejecutar funciones de alta de leads e informes.
 - Solo usuarios autenticados pueden leer y actualizar leads.
 - La clave privada `service_role` debe quedarse fuera del frontend.

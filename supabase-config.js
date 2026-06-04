@@ -1,4 +1,4 @@
 window.LEGAL_PREVENT_SUPABASE = {
   url: "https://wtpfrlsbfishvworjdtr.supabase.co",
-  anonKey: "sb_publishable_BRJrc6LKobezOSRGe8hh3w_sNHkTgvH"
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind0cGZybHNiZmlzaHZ3b3JqZHRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1OTE2NzUsImV4cCI6MjA5NjE2NzY3NX0.DvC_1sxy7bEgfEV6cQsMJGl8zfseYllUug7ohxMQDFY"
 };

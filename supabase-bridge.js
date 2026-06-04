@@ -84,12 +84,11 @@
     }
 
     try {
-      const rows = await request("/rest/v1/leads", {
+      const row = await request("/rest/v1/rpc/submit_lead", {
         method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify(record)
+        body: JSON.stringify({ p_payload: record })
       });
-      return { ok: true, configured: true, record: rows?.[0] || record };
+      return { ok: true, configured: true, record: row || record };
     } catch (error) {
       savePending(record, "supabase_insert_failed");
       console.warn("No se pudo enviar el lead a Supabase", error);
@@ -120,12 +119,11 @@
     }
 
     try {
-      const rows = await request("/rest/v1/diagnostics", {
+      const row = await request("/rest/v1/rpc/submit_diagnostic", {
         method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify(record)
+        body: JSON.stringify({ p_payload: record })
       });
-      return { ok: true, configured: true, record: rows?.[0] || record };
+      return { ok: true, configured: true, record: row || record };
     } catch (error) {
       savePending(record, "supabase_diagnostic_insert_failed");
       console.warn("No se pudo enviar el diagnóstico a Supabase", error);
