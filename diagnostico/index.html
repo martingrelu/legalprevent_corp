@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Diagnóstico gratuito | LEGAL PREVENT</title>
+    <meta
+      name="description"
+      content="Diagnóstico gratuito de cumplimiento legal para empresas: laboral, protección de datos, igualdad, canal de denuncias, compliance y uso de dispositivos."
+    />
+    <meta property="og:title" content="Diagnóstico gratuito | LEGAL PREVENT" />
+    <meta
+      property="og:description"
+      content="Obtén una puntuación inicial de cumplimiento y prioridades en menos de 5 minutos."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="../styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="../#inicio" aria-label="LEGAL PREVENT inicio">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+        <span>LEGAL PREVENT</span>
+      </a>
+      <nav class="site-nav legal-nav" aria-label="Navegación principal">
+        <a href="../#soluciones">Soluciones</a>
+        <a href="../#areas">Áreas</a>
+        <a href="../#sectores">Sectores</a>
+        <a href="../#precios">Precios</a>
+      </nav>
+      <a class="header-cta" href="../#contacto">Solicitar demo</a>
+    </header>
+
+    <main class="diagnostic-page section-shell">
+      <nav class="breadcrumb" aria-label="Migas de pan">
+        <a href="../">Inicio</a><span>/</span><span>Diagnóstico gratuito</span>
+      </nav>
+
+      <section class="diagnostic-hero">
+        <div>
+          <span class="section-label">Herramienta de captación</span>
+          <h1>Diagnóstico gratuito de cumplimiento legal</h1>
+          <p>
+            Evalúa en menos de 5 minutos el estado inicial de tu empresa y recibe un informe visual
+            con áreas críticas, prioridades y riesgos detectados.
+          </p>
+        </div>
+        <div class="diagnostic-mini-card" aria-label="Arquitectura preparada">
+          <span>Preparado para integrar</span>
+          <strong>CRM · Email · IA documental · Stripe</strong>
+        </div>
+      </section>
+
+      <section class="diagnostic-tool" data-diagnostic-app>
+        <aside class="diagnostic-sidebar" aria-label="Progreso del diagnóstico">
+          <span class="section-label">Progreso</span>
+          <ol>
+            <li class="active" data-step-indicator="1"><span>1</span>Datos empresa</li>
+            <li data-step-indicator="2"><span>2</span>Cuestionario</li>
+            <li data-step-indicator="3"><span>3</span>Scoring</li>
+            <li data-step-indicator="4"><span>4</span>Informe</li>
+            <li data-step-indicator="5"><span>5</span>Captación</li>
+          </ol>
+        </aside>
+
+        <div class="diagnostic-workspace">
+          <form class="diagnostic-step is-active" data-diagnostic-step="1">
+            <div class="diagnostic-heading">
+              <span class="section-label">Paso 1</span>
+              <h2>Datos de empresa</h2>
+              <p>Estos datos permiten personalizar el informe y preparar el lead para futuras integraciones.</p>
+            </div>
+            <div class="form-grid">
+              <label>Nombre de empresa<input name="company" type="text" autocomplete="organization" required /></label>
+              <label>Email profesional<input name="email" type="email" autocomplete="email" required /></label>
+              <label>Teléfono<input name="phone" type="tel" autocomplete="tel" required /></label>
+              <label>
+                Nº empleados
+                <select name="employees" required>
+                  <option value="">Seleccionar</option>
+                  <option>1-10</option>
+                  <option>11-50</option>
+                  <option>51-250</option>
+                  <option>Más de 250</option>
+                </select>
+              </label>
+              <label>
+                Sector
+                <select name="sector" required>
+                  <option value="">Seleccionar</option>
+                  <option>Hostelería</option>
+                  <option>Comercio</option>
+                  <option>Transporte</option>
+                  <option>Clínicas</option>
+                  <option>Despachos</option>
+                  <option>Industria</option>
+                  <option>Empresas de servicios</option>
+                  <option>PYMES</option>
+                </select>
+              </label>
+            </div>
+            <label class="check-row">
+              <input name="privacy" type="checkbox" required />
+              <span>He leído y acepto la <a href="../politica-privacidad/">Política de Privacidad</a>.</span>
+            </label>
+            <label class="check-row">
+              <input name="commercial" type="checkbox" />
+              <span>Acepto recibir comunicaciones comerciales de LEGAL PREVENT.</span>
+            </label>
+            <div class="diagnostic-actions">
+              <button class="btn btn-primary" type="submit">Continuar al cuestionario</button>
+            </div>
+          </form>
+
+          <section class="diagnostic-step" data-diagnostic-step="2" aria-live="polite">
+            <div class="diagnostic-heading">
+              <span class="section-label">Paso 2</span>
+              <h2>Cuestionario interactivo</h2>
+              <p>Responde Sí, No o Parcialmente. El motor calculará la puntuación por área y el nivel global.</p>
+            </div>
+            <div class="question-progress">
+              <span data-question-count>0 de 21 preguntas</span>
+              <div><span data-question-progress style="width: 0%"></span></div>
+            </div>
+            <div class="question-list" data-question-list></div>
+            <div class="diagnostic-actions">
+              <button class="btn btn-secondary" type="button" data-back-step="1">Volver</button>
+              <button class="btn btn-primary" type="button" data-run-scoring>Generar puntuación</button>
+            </div>
+          </section>
+
+          <section class="diagnostic-step" data-diagnostic-step="3">
+            <div class="diagnostic-heading">
+              <span class="section-label">Paso 3</span>
+              <h2>Motor de scoring</h2>
+              <p>El sistema pondera respuestas por área, calcula el cumplimiento global y clasifica el riesgo.</p>
+            </div>
+            <div class="scoring-preview">
+              <div class="score-ring diagnostic-score-ring" style="--score: 0">
+                <strong data-score-value>0</strong>
+              </div>
+              <div>
+                <span class="score-status" data-score-status>Calculando</span>
+                <p data-score-summary>Preparando resultado...</p>
+              </div>
+            </div>
+            <div class="integration-strip">
+              <span>Arquitectura preparada</span>
+              <strong>CRM · Email marketing · Automatizaciones · Generación documental IA · Stripe</strong>
+            </div>
+            <div class="diagnostic-actions">
+              <button class="btn btn-primary" type="button" data-view-report>Ver informe visual</button>
+            </div>
+          </section>
+
+          <section class="diagnostic-step" data-diagnostic-step="4">
+            <div class="diagnostic-heading">
+              <span class="section-label">Paso 4</span>
+              <h2>Informe visual</h2>
+              <p>Nivel de cumplimiento, áreas críticas, prioridades y riesgos detectados.</p>
+            </div>
+            <div class="report-grid">
+              <article class="report-score-card">
+                <span>Nivel de cumplimiento</span>
+                <div class="score-ring diagnostic-score-ring" style="--score: 0">
+                  <strong data-report-score>0</strong>
+                </div>
+                <strong data-report-classification>Sin clasificar</strong>
+              </article>
+              <article class="report-card">
+                <span>Áreas críticas</span>
+                <ul data-critical-areas></ul>
+              </article>
+              <article class="report-card">
+                <span>Prioridades</span>
+                <ul data-priorities></ul>
+              </article>
+              <article class="report-card">
+                <span>Riesgos detectados</span>
+                <ul data-risks></ul>
+              </article>
+            </div>
+            <div class="area-breakdown" data-area-breakdown></div>
+            <div class="diagnostic-actions">
+              <button class="btn btn-secondary" type="button" data-back-step="2">Revisar respuestas</button>
+              <button class="btn btn-primary" type="button" data-next-capture>Continuar</button>
+            </div>
+          </section>
+
+          <section class="diagnostic-step" data-diagnostic-step="5">
+            <div class="diagnostic-heading">
+              <span class="section-label">Paso 5</span>
+              <h2>Próximo paso</h2>
+              <p>
+                El diagnóstico está preparado para convertirse en lead comercial, activar automatizaciones
+                y generar documentación o PDF cuando se conecten las integraciones.
+              </p>
+            </div>
+            <div class="capture-panel">
+              <div>
+                <h3>Solicita una demostración personalizada</h3>
+                <p>Revisaremos tus áreas críticas y te mostraremos cómo automatizar el plan de prevención.</p>
+              </div>
+              <div class="diagnostic-actions">
+                <a class="btn btn-primary" href="../#contacto" data-demo-request>Solicitar demostración</a>
+                <button class="btn btn-secondary" type="button" data-download-report>Descargar informe PDF</button>
+              </div>
+            </div>
+            <div class="integration-grid">
+              <article><span>CRM</span><strong data-integration-status="crm">Lead listo</strong></article>
+              <article><span>Email marketing</span><strong data-integration-status="email">Segmentación lista</strong></article>
+              <article><span>Automatizaciones</span><strong data-integration-status="automation">Workflow listo</strong></article>
+              <article><span>IA documental</span><strong data-integration-status="ai">Prompt listo</strong></article>
+              <article><span>Stripe</span><strong data-integration-status="stripe">Plan pendiente</strong></article>
+            </div>
+            <p class="form-feedback" role="status" aria-live="polite" data-diagnostic-feedback></p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="../#inicio" aria-label="LEGAL PREVENT inicio">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+        <span>LEGAL PREVENT</span>
+      </a>
+      <nav aria-label="Enlaces de pie de página">
+        <a href="../">Inicio</a>
+        <a href="../#soluciones">Soluciones</a>
+        <a href="../#areas">Áreas</a>
+        <a href="../#sectores">Sectores</a>
+        <a href="../#precios">Precios</a>
+        <a href="../#contacto">Contacto</a>
+        <a href="../aviso-legal/">Aviso Legal</a>
+        <a href="../politica-privacidad/">Política de Privacidad</a>
+        <a href="../politica-cookies/">Política de Cookies</a>
+        <a href="../terminos-condiciones/">Términos y Condiciones</a>
+        <a href="../documentacion-legal/">Documentación legal</a>
+      </nav>
+      <p class="copyright">© <span data-year></span> LEGAL PREVENT. Todos los derechos reservados.</p>
+    </footer>
+
+    <script src="../script.js"></script>
+    <script src="./diagnostico.js"></script>
+  </body>
+</html>
