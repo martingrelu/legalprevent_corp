@@ -547,73 +547,244 @@ if (diagnosticApp) {
     return lead;
   };
 
-  const escapePdfText = (value) =>
-    String(value)
-      .replace(/\\/g, "\\\\")
-      .replace(/\(/g, "\\(")
-      .replace(/\)/g, "\\)")
-      .replace(/[^\x20-\x7E]/g, "");
+  const pdfText = (value) => {
+    const clean = String(value ?? "").replace(/[^\S\r\n]+/g, " ").trim();
+    let escaped = "";
+    for (let index = 0; index < clean.length; index += 1) {
+      const char = clean[index];
+      const code = clean.charCodeAt(index);
+      if (char === "\\" || char === "(" || char === ")") {
+        escaped += `\\${char}`;
+      } else if (code < 32 || code > 255) {
+        escaped += " ";
+      } else {
+        escaped += char;
+      }
+    }
+    return `(${escaped})`;
+  };
 
-  const createPdfBlob = (lines) => {
-    const textCommands = lines
-      .slice(0, 42)
-      .map((line, index) => `BT /F1 10 Tf 50 ${770 - index * 16} Td (${escapePdfText(line)}) Tj ET`)
-      .join("\n");
+  const wrapPdfText = (value, maxChars = 82) => {
+    const words = String(value ?? "").replace(/\s+/g, " ").trim().split(" ");
+    const lines = [];
+    let line = "";
+    words.forEach((word) => {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length > maxChars && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    });
+    if (line) lines.push(line);
+    return lines;
+  };
+
+  const reportTone = (score) => {
+    if (score >= 80) return { label: "Controlado", rgb: "22 128 60", summary: "La empresa presenta una base de cumplimiento razonablemente estructurada." };
+    if (score >= 60) return { label: "Prioritario", rgb: "180 83 9", summary: "La empresa tiene una base parcial, pero conviene actuar sobre brechas documentales y evidencias." };
+    return { label: "Crítico", rgb: "180 35 24", summary: "La empresa presenta brechas relevantes que requieren un plan de regularización ordenado." };
+  };
+
+  const recommendedActions = (area) => [
+    `Revisar evidencias y responsables vinculados a ${area.area}.`,
+    "Definir un calendario de corrección con prioridad, responsable y fecha objetivo.",
+    "Conservar trazabilidad documental de cada medida implantada."
+  ];
+
+  const createProfessionalPdfBlob = (payload) => {
+    const pages = [];
+    let commands = [];
+    let y = 780;
+    const margin = 48;
+    const tone = reportTone(payload.result.globalScore);
+    const today = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "long", year: "numeric" }).format(new Date());
+
+    const add = (command) => commands.push(command);
+    const pdfRgb = (rgb) =>
+      rgb
+        .split(" ")
+        .map((channel) => (Number(channel) / 255).toFixed(3))
+        .join(" ");
+    const color = (rgb) => add(`${pdfRgb(rgb)} rg`);
+    const stroke = (rgb) => add(`${pdfRgb(rgb)} RG`);
+    const rect = (x, top, width, height, rgb) => {
+      color(rgb);
+      add(`${x} ${top - height} ${width} ${height} re f`);
+    };
+    const line = (x1, y1, x2, y2, rgb = "217 224 234") => {
+      stroke(rgb);
+      add(`${x1} ${y1} m ${x2} ${y2} l S`);
+    };
+    const text = (value, x, top, size = 10, font = "F1", rgb = "15 23 42") => {
+      color(rgb);
+      add(`BT /${font} ${size} Tf ${x} ${top} Td ${pdfText(value)} Tj ET`);
+    };
+    const paragraph = (value, x, top, maxChars = 82, size = 10, leading = 15, font = "F1", rgb = "51 65 85") => {
+      let cursor = top;
+      wrapPdfText(value, maxChars).forEach((lineText) => {
+        text(lineText, x, cursor, size, font, rgb);
+        cursor -= leading;
+      });
+      return cursor;
+    };
+    const footer = (pageNumber) => {
+      line(margin, 46, 547, 46, "226 232 240");
+      text("LEGAL PREVENT | Informe de diagnóstico preventivo", margin, 28, 8, "F2", "71 85 105");
+      text(`Página ${pageNumber}`, 500, 28, 8, "F1", "100 116 139");
+    };
+    const newPage = () => {
+      if (commands.length) {
+        footer(pages.length + 1);
+        pages.push(commands.join("\n"));
+      }
+      commands = [];
+      y = 780;
+    };
+    const ensureSpace = (height = 90) => {
+      if (y - height < 70) newPage();
+    };
+    const sectionTitle = (label, title) => {
+      ensureSpace(54);
+      text(label.toUpperCase(), margin, y, 8, "F2", "30 94 255");
+      y -= 19;
+      text(title, margin, y, 18, "F2", "15 23 42");
+      y -= 24;
+    };
+    const bullet = (value, x = margin, maxChars = 82) => {
+      ensureSpace(34);
+      text("-", x, y, 10, "F2", "30 94 255");
+      y = paragraph(value, x + 14, y, maxChars, 9.5, 14, "F1", "51 65 85") - 4;
+    };
+
+    rect(0, 842, 595, 842, "248 250 252");
+    rect(0, 842, 595, 172, "15 23 42");
+    rect(48, 752, 62, 62, "30 94 255");
+    text("LP", 67, 712, 24, "F2", "255 255 255");
+    text("LEGAL PREVENT", 128, 724, 12, "F2", "255 255 255");
+    text("Informe de diagnóstico preventivo", 128, 695, 28, "F2", "255 255 255");
+    text("Cumplimiento legal inteligente para empresas modernas", 128, 672, 11, "F1", "203 213 225");
+
+    rect(48, 610, 499, 118, "255 255 255");
+    text(payload.company.company || "Empresa analizada", 70, 570, 22, "F2", "15 23 42");
+    text(`Fecha de emisión: ${today}`, 70, 544, 10, "F1", "71 85 105");
+    text(`Sector: ${payload.company.sector || "No indicado"} | Empleados: ${payload.company.employees || "No indicado"}`, 70, 526, 10, "F1", "71 85 105");
+    text(`Contacto: ${payload.company.email || "No indicado"} | ${payload.company.phone || "Sin teléfono"}`, 70, 508, 10, "F1", "71 85 105");
+
+    rect(48, 450, 230, 112, "255 255 255");
+    text("Nivel de cumplimiento", 70, 412, 10, "F2", "71 85 105");
+    text(`${payload.result.globalScore}/100`, 70, 372, 34, "F2", tone.rgb);
+    text(`Clasificación: ${payload.result.classification.label}`, 70, 344, 11, "F2", "15 23 42");
+
+    rect(300, 450, 247, 112, "255 255 255");
+    text("Resumen ejecutivo", 322, 412, 10, "F2", "71 85 105");
+    paragraph(tone.summary, 322, 390, 38, 10, 15, "F1", "51 65 85");
+
+    y = 280;
+    text("Este informe es una evaluación preliminar orientada a priorizar acciones de prevención legal.", margin, y, 10, "F1", "51 65 85");
+    y -= 18;
+    text("No sustituye el asesoramiento jurídico individualizado ni una auditoría completa.", margin, y, 10, "F1", "51 65 85");
+
+    newPage();
+    sectionTitle("01", "Resumen ejecutivo");
+    bullet(`Puntuación global: ${payload.result.globalScore}/100, con clasificación ${payload.result.classification.label}.`);
+    bullet(`Áreas críticas detectadas: ${payload.result.criticalAreas.length ? payload.result.criticalAreas.map((item) => item.area).join(", ") : "sin áreas críticas en esta fase"}.`);
+    bullet(`Plan recomendado: ${recommendedPlanFromResult(payload.result, payload.company.employees)} según tamaño, score y complejidad inicial.`);
+    bullet("Objetivo inmediato: convertir el diagnóstico en un plan de prevención con responsables, evidencias y calendario de seguimiento.");
+
+    sectionTitle("02", "Scoring por áreas");
+    payload.result.areaScores.forEach((item) => {
+      ensureSpace(34);
+      text(item.area, margin, y, 10, "F2", "15 23 42");
+      rect(230, y + 7, 230, 9, "226 232 240");
+      rect(230, y + 7, Math.max(4, (item.score / 100) * 230), 9, item.score >= 80 ? "22 163 74" : item.score >= 60 ? "245 158 11" : "220 38 38");
+      text(`${item.score}/100`, 480, y, 10, "F2", "15 23 42");
+      y -= 25;
+    });
+
+    sectionTitle("03", "Plan de acción recomendado");
+    const critical = payload.result.criticalAreas.length ? payload.result.criticalAreas : payload.result.areaScores.slice().sort((a, b) => a.score - b.score).slice(0, 2);
+    critical.slice(0, 3).forEach((area, index) => {
+      ensureSpace(96);
+      rect(margin, y + 16, 499, 78, index === 0 ? "239 246 255" : "248 250 252");
+      text(`${index + 1}. ${area.area}`, margin + 16, y - 8, 12, "F2", "15 23 42");
+      y -= 28;
+      recommendedActions(area).forEach((action) => {
+        text(`- ${action}`, margin + 20, y, 8.8, "F1", "51 65 85");
+        y -= 13;
+      });
+      y -= 13;
+    });
+
+    newPage();
+    sectionTitle("04", "Riesgos detectados");
+    const risks = payload.result.risks.length ? payload.result.risks : [{ area: "General", risk: "No se han detectado riesgos críticos en esta fase, aunque recomendamos conservar evidencias y revisiones periódicas." }];
+    risks.slice(0, 14).forEach((item) => bullet(`${item.area}: ${item.risk}`));
+
+    sectionTitle("05", "Próximos pasos");
+    payload.result.priorities.forEach((item) => bullet(item));
+    bullet("Agendar una revisión guiada para validar respuestas, evidencias disponibles y obligaciones aplicables.");
+    bullet("Centralizar documentación, responsables y alertas recurrentes en una herramienta de seguimiento.");
+
+    sectionTitle("06", "Nota legal y alcance");
+    paragraph(
+      "Este documento tiene finalidad informativa y preventiva. Se basa en las respuestas facilitadas por la empresa y no constituye asesoramiento jurídico individualizado, dictamen profesional ni auditoría legal completa. Para decisiones concretas o situaciones de riesgo, debe revisarse el caso con asesoramiento profesional cualificado.",
+      margin,
+      y,
+      92,
+      9.5,
+      14,
+      "F1",
+      "51 65 85"
+    );
+
+    newPage();
+
     const objects = [
-      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
-      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
-      "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
-      `5 0 obj << /Length ${textCommands.length} >> stream\n${textCommands}\nendstream endobj`
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      `<< /Type /Pages /Kids [${pages.map((_, index) => `${3 + index * 2} 0 R`).join(" ")}] /Count ${pages.length} >>`
     ];
+    pages.forEach((page, index) => {
+      const pageObject = 3 + index * 2;
+      const contentObject = pageObject + 1;
+      objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 100 0 R /F2 101 0 R >> >> /Contents ${contentObject} 0 R >>`);
+      objects.push(`<< /Length ${page.length} >> stream\n${page}\nendstream`);
+    });
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
 
     let pdf = "%PDF-1.4\n";
     const offsets = [0];
-    objects.forEach((object) => {
+    objects.forEach((object, index) => {
       offsets.push(pdf.length);
-      pdf += `${object}\n`;
+      const objectNumber = index < objects.length - 2 ? index + 1 : index === objects.length - 2 ? 100 : 101;
+      pdf += `${objectNumber} 0 obj ${object} endobj\n`;
     });
     const xrefOffset = pdf.length;
-    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-    offsets.slice(1).forEach((offset) => {
-      pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+    pdf += `xref\n0 102\n0000000000 65535 f \n`;
+    const offsetMap = new Map();
+    objects.forEach((_, index) => {
+      const objectNumber = index < objects.length - 2 ? index + 1 : index === objects.length - 2 ? 100 : 101;
+      offsetMap.set(objectNumber, offsets[index + 1]);
     });
-    pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+    for (let objectNumber = 1; objectNumber <= 101; objectNumber += 1) {
+      const offset = offsetMap.get(objectNumber);
+      pdf += offset ? `${String(offset).padStart(10, "0")} 00000 n \n` : "0000000000 65535 f \n";
+    }
+    pdf += `trailer << /Size 102 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
 
-    return new Blob([pdf], { type: "application/pdf" });
+    const bytes = Uint8Array.from(pdf, (char) => char.charCodeAt(0) & 0xff);
+    return new Blob([bytes], { type: "application/pdf" });
   };
 
   const downloadReport = () => {
     const payload = buildPayload();
-    const lines = [
-      "LEGAL PREVENT - Informe de diagnostico inicial",
-      "",
-      `Empresa: ${payload.company.company}`,
-      `Email: ${payload.company.email}`,
-      `Telefono: ${payload.company.phone}`,
-      `Empleados: ${payload.company.employees}`,
-      `Sector: ${payload.company.sector}`,
-      "",
-      `Puntuacion: ${payload.result.globalScore}/100`,
-      `Clasificacion: ${payload.result.classification.label}`,
-      "",
-      "Areas:",
-      ...payload.result.areaScores.map((item) => `- ${item.area}: ${item.score}/100`),
-      "",
-      "Prioridades:",
-      ...payload.result.priorities.map((item) => `- ${item}`),
-      "",
-      "Riesgos detectados:",
-      ...payload.result.risks.map((item) => `- ${item.area}: ${item.risk}`),
-      "",
-      "Nota: PDF inicial generado en cliente. En produccion puede sustituirse por generacion PDF server-side o IA documental."
-    ];
-
-    const blob = createPdfBlob(lines);
+    const blob = createProfessionalPdfBlob(payload);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `legal-prevent-diagnostico-${Date.now()}.pdf`;
+    link.download = `legal-prevent-informe-diagnostico-${Date.now()}.pdf`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -663,7 +834,7 @@ if (diagnosticApp) {
   document.querySelector("[data-download-report]")?.addEventListener("click", () => {
     downloadReport();
     const feedback = document.querySelector("[data-diagnostic-feedback]");
-    if (feedback) feedback.textContent = "Informe preparado para descarga. En producción se conectará a generación PDF avanzada.";
+    if (feedback) feedback.textContent = "Informe profesional descargado. Puedes compartirlo internamente o revisarlo con nuestro equipo.";
   });
   document.querySelector("[data-demo-request]")?.addEventListener("click", () => {
     const crmLead = saveLeadToCrm();

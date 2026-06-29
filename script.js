@@ -411,3 +411,39 @@ document.querySelectorAll("form[data-form]").forEach((form) => {
     }, 650);
   });
 });
+
+const checkoutFeedback = document.querySelector("[data-checkout-feedback]");
+
+document.querySelectorAll("[data-checkout-plan]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const plan = button.dataset.checkoutPlan;
+    const originalText = button.textContent;
+
+    button.disabled = true;
+    button.textContent = "Preparando pago...";
+    if (checkoutFeedback) {
+      checkoutFeedback.textContent = "Estamos preparando la contratación segura con Stripe.";
+    }
+
+    try {
+      const result = await window.LegalPreventSupabase?.createCheckoutSession({
+        plan,
+        successUrl: `${window.location.origin}/gracias/?origen=stripe&plan=${encodeURIComponent(plan)}`,
+        cancelUrl: `${window.location.origin}/#precios`,
+        page: window.location.href
+      });
+
+      if (!result?.url) throw new Error("No se ha podido crear la sesión de pago.");
+      window.location.href = result.url;
+    } catch (error) {
+      console.warn("No se pudo iniciar Stripe Checkout", error);
+      if (checkoutFeedback) {
+        checkoutFeedback.textContent =
+          "La contratación online aún no está activa. Déjanos tu email y te ayudamos a finalizar el alta.";
+      }
+      document.querySelector("#contacto")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  });
+});

@@ -332,6 +332,7 @@
                 <option>Transporte</option>
                 <option>Clínicas</option>
                 <option>Despachos</option>
+                <option>Gestorías</option>
                 <option>Industria</option>
                 <option>Empresas de servicios</option>
                 <option>PYMES</option>
@@ -509,6 +510,7 @@
           <article class="sector-card reveal"><strong>Transporte</strong><span>Alertas para documentación operativa, personal, flota y revisiones periódicas.</span></article>
           <article class="sector-card reveal"><strong>Clínicas</strong><span>Prevención documental para datos sensibles, equipos y protocolos internos.</span></article>
           <article class="sector-card reveal"><strong>Despachos</strong><span>Visibilidad sobre obligaciones propias y documentación de clientes empresariales.</span></article>
+          <article class="sector-card reveal"><strong>Gestorías</strong><span>Control de obligaciones, evidencias y documentación recurrente para clientes empresariales.</span></article>
           <article class="sector-card reveal"><strong>Industria</strong><span>Trazabilidad para auditorías, igualdad, laboral, canal de denuncias y compliance.</span></article>
           <article class="sector-card reveal"><strong>Empresas de servicios</strong><span>Gestión centralizada de plantillas, contratos, políticas y evidencias.</span></article>
           <article class="sector-card reveal"><strong>PYMES</strong><span>Una forma sencilla de priorizar riesgos sin crear carga administrativa.</span></article>
@@ -525,19 +527,25 @@
             <span>Starter</span>
             <strong>29 €<small>/mes</small></strong>
             <p>Para empresas pequeñas que quieren ordenar obligaciones esenciales.</p>
-            <a class="btn btn-secondary" href="#contacto">Solicitar demo</a>
+            <button class="btn btn-secondary" type="button" data-checkout-plan="starter">Contratar Starter</button>
           </article>
           <article class="price-card featured reveal">
             <span>Pyme</span>
             <strong>79 €<small>/mes</small></strong>
             <p>Diagnóstico, documentación y alertas para equipos en crecimiento.</p>
-            <a class="btn btn-primary" href="#contacto">Empezar</a>
+            <button class="btn btn-primary" type="button" data-checkout-plan="pyme">Contratar Pyme</button>
           </article>
           <article class="price-card reveal">
             <span>Business</span>
             <strong>149 €<small>/mes</small></strong>
             <p>Mayor cobertura, seguimiento continuo y soporte profesional ampliado.</p>
-            <a class="btn btn-secondary" href="#contacto">Solicitar demo</a>
+            <button class="btn btn-secondary" type="button" data-checkout-plan="business">Contratar Business</button>
+          </article>
+          <article class="price-card reveal">
+            <span>Gestorías</span>
+            <strong>199 €<small>/mes</small></strong>
+            <p>Plan sectorial para gestionar obligaciones recurrentes y evidencias de clientes empresa.</p>
+            <button class="btn btn-secondary" type="button" data-checkout-plan="gestorias">Contratar Gestorías</button>
           </article>
           <article class="price-card reveal">
             <span>Enterprise</span>
@@ -546,6 +554,7 @@
             <a class="btn btn-secondary" href="#contacto">Contactar</a>
           </article>
         </div>
+        <p class="form-feedback pricing-feedback" data-checkout-feedback role="status" aria-live="polite"></p>
       </section>
 
       <section class="final-cta section-shell reveal" id="contacto">
