@@ -102,7 +102,7 @@
   const createCheckoutSession = async (input) => {
     if (!isConfigured()) throw new Error("Supabase no está configurado.");
 
-    const response = await fetch(`${cleanBaseUrl()}/functions/v1/create-checkout-session`, {
+    const response = await fetch(`${cleanBaseUrl()}/functions/v1/super-api`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify({
