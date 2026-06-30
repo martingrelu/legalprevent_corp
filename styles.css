@@ -1682,6 +1682,14 @@ select {
   font-size: 0.95rem;
 }
 
+.price-tax-note {
+  margin-top: -0.55rem;
+  color: #64748b;
+  font-size: 0.86rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .price-card p {
   color: #475569;
   line-height: 1.6;
