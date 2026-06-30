@@ -426,6 +426,10 @@ document.querySelectorAll("[data-checkout-plan]").forEach((button) => {
     }
 
     try {
+      if (!window.LegalPreventSupabase?.createCheckoutSession) {
+        throw new Error("El conector de Supabase no está cargado en esta página.");
+      }
+
       const result = await window.LegalPreventSupabase?.createCheckoutSession({
         plan,
         successUrl: `${window.location.origin}/gracias/?origen=stripe&plan=${encodeURIComponent(plan)}`,
@@ -439,7 +443,7 @@ document.querySelectorAll("[data-checkout-plan]").forEach((button) => {
       console.warn("No se pudo iniciar Stripe Checkout", error);
       if (checkoutFeedback) {
         checkoutFeedback.textContent =
-          "La contratación online aún no está activa. Déjanos tu email y te ayudamos a finalizar el alta.";
+          "No hemos podido abrir Stripe todavía. Déjanos tu email y te ayudamos a finalizar el alta.";
       }
       document.querySelector("#contacto")?.scrollIntoView({ behavior: "smooth", block: "start" });
       button.disabled = false;
