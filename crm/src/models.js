@@ -31,7 +31,7 @@ export const LEAD_SOURCES = [
 ];
 
 export const PRIORITIES = ["Baja", "Media", "Alta"];
-export const PLANS = ["Starter", "Pro", "Premium", "Personalizado"];
+export const PLANS = ["Starter", "Pyme", "Business", "Gestorías", "Pro", "Premium", "Personalizado"];
 export const CLIENT_STATUSES = ["Activo", "Pendiente de pago", "En revision", "Cancelado"];
 export const TASK_STATUSES = ["Pendiente", "En curso", "Completada", "Vencida"];
 export const INTERACTION_TYPES = [

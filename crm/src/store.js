@@ -512,7 +512,10 @@ export function convertLeadToClient(state, leadId, options = {}) {
   if (lead.convertedClientId && next.clients.some((client) => client.id === lead.convertedClientId)) return next;
 
   const priceByPlan = {
-    Starter: 290,
+    Starter: 29,
+    Pyme: 79,
+    Business: 149,
+    Gestorías: 199,
     Pro: 590,
     Premium: 990,
     Personalizado: lead.estimatedMonthlyRevenue || 1200,

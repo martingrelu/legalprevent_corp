@@ -1208,7 +1208,7 @@ function handleClick(event) {
   if (action === "export-backup") exportBackup();
   if (action === "open-import-backup") openModal(renderImportBackupModal());
   if (action === "open-supabase-login") openModal(renderSupabaseLoginModal());
-  if (action === "sync-supabase") syncSupabaseLeads();
+  if (action === "sync-supabase") syncSupabaseData();
   if (action === "supabase-logout") {
     window.LegalPreventSupabase?.signOut();
     render();
@@ -1247,11 +1247,14 @@ function handleClick(event) {
   }
 }
 
-async function syncSupabaseLeads() {
+async function syncSupabaseData() {
   try {
     const rows = await window.LegalPreventSupabase.fetchLeads();
+    const billing = await window.LegalPreventSupabase.fetchBillingData?.();
     const now = new Date().toISOString();
     let imported = 0;
+    let activated = 0;
+    let syncedPayments = 0;
 
     rows.forEach((row) => {
       const existingIndex = state.leads.findIndex((lead) => lead.email === row.email);
@@ -1290,31 +1293,157 @@ async function syncSupabaseLeads() {
       }
     });
 
+    if (billing) {
+      const result = syncBillingIntoCrm(billing, now);
+      activated = result.activated;
+      syncedPayments = result.syncedPayments;
+    }
+
     saveState(state);
     render();
-    showToast(imported ? `${imported} leads nuevos sincronizados.` : "Leads centrales ya sincronizados.");
+    showToast(
+      [
+        imported ? `${imported} leads nuevos` : "leads al día",
+        activated ? `${activated} clientes activados` : "clientes al día",
+        syncedPayments ? `${syncedPayments} pagos sincronizados` : "pagos al día",
+      ].join(" · "),
+    );
   } catch (error) {
     showToast(error.message || "No se pudo sincronizar Supabase.", "error");
   }
+}
+
+function syncBillingIntoCrm(billing, now) {
+  const planLabels = {
+    starter: "Starter",
+    pyme: "Pyme",
+    business: "Business",
+    gestorias: "Gestorías",
+  };
+  const monthlyPriceByPlan = {
+    starter: 29,
+    pyme: 79,
+    business: 149,
+    gestorias: 199,
+  };
+  let activated = 0;
+  let syncedPayments = 0;
+
+  const subscriptionsById = new Map((billing.subscriptions || []).map((item) => [item.stripe_subscription_id, item]));
+  const paymentsBySubscription = new Map();
+  (billing.payments || []).forEach((payment) => {
+    if (!payment.stripe_subscription_id) return;
+    const existing = paymentsBySubscription.get(payment.stripe_subscription_id) || [];
+    existing.push(payment);
+    paymentsBySubscription.set(payment.stripe_subscription_id, existing);
+  });
+
+  (billing.checkoutSessions || [])
+    .filter((session) => session.payment_status === "paid" || session.status === "complete")
+    .forEach((session) => {
+      const email = String(session.customer_email || session.payload?.customer_details?.email || "").toLowerCase();
+      if (!email) return;
+
+      const planKey = String(session.plan || session.payload?.metadata?.plan || "starter").toLowerCase();
+      const plan = planLabels[planKey] || "Starter";
+      const subscription = subscriptionsById.get(session.stripe_subscription_id) || {};
+      const lead = state.leads.find((item) => item.email?.toLowerCase() === email);
+      const existingClient = state.clients.find((item) => item.billingEmail?.toLowerCase() === email);
+      const renewalDate = subscription.current_period_end || (session.payload?.expires_at ? new Date(session.payload.expires_at * 1000).toISOString() : addMonths(now, 1));
+
+      let client = existingClient;
+      if (!client) {
+        client = {
+          id: `client-${session.stripe_customer_id || session.id}`,
+          leadId: lead?.id || "",
+          businessName: lead?.companyName || session.payload?.customer_details?.name || `Cliente Stripe - ${email}`,
+          taxId: session.payload?.customer_details?.tax_ids?.[0]?.value || "",
+          address: formatStripeAddress(session.payload?.customer_details?.address),
+          primaryContact: lead?.contactName || session.payload?.customer_details?.name || "Pendiente",
+          billingEmail: email,
+          plan,
+          monthlyPrice: monthlyPriceByPlan[planKey] || 0,
+          signupDate: session.created_at || now,
+          renewalDate,
+          status: "Activo",
+          legalReviewPending: false,
+          ownerId: getCurrentUser(state).id,
+          dataOrigin: "stripe",
+          stripeCustomerId: session.stripe_customer_id,
+          stripeSubscriptionId: session.stripe_subscription_id,
+        };
+        state.clients.unshift(client);
+        activated += 1;
+      } else {
+        Object.assign(client, {
+          plan,
+          monthlyPrice: monthlyPriceByPlan[planKey] || client.monthlyPrice,
+          renewalDate,
+          status: subscription.status === "canceled" ? "Cancelado" : "Activo",
+          dataOrigin: client.dataOrigin || "stripe",
+          stripeCustomerId: session.stripe_customer_id || client.stripeCustomerId,
+          stripeSubscriptionId: session.stripe_subscription_id || client.stripeSubscriptionId,
+        });
+      }
+
+      if (lead) {
+        lead.status = "Cliente ganado";
+        lead.convertedClientId = client.id;
+        lead.lastInteractionAt = now;
+      }
+
+      (paymentsBySubscription.get(session.stripe_subscription_id) || []).forEach((payment) => {
+        if (state.payments.some((item) => item.stripeInvoiceId === payment.stripe_invoice_id)) return;
+        state.payments.unshift({
+          id: `pay-${payment.stripe_invoice_id}`,
+          clientId: client.id,
+          amount: Number(payment.amount_paid || 0) / 100,
+          dueDate: payment.created_at || now,
+          paidAt: payment.status === "paid" ? payment.created_at || now : "",
+          status: payment.status === "paid" ? "paid" : payment.status === "open" ? "pending" : "failed",
+          stripeInvoiceId: payment.stripe_invoice_id,
+          hostedInvoiceUrl: payment.hosted_invoice_url || "",
+          dataOrigin: "stripe",
+        });
+        syncedPayments += 1;
+      });
+    });
+
+  return { activated, syncedPayments };
+}
+
+function addMonths(value, months) {
+  const date = new Date(value);
+  date.setMonth(date.getMonth() + months);
+  return date.toISOString();
+}
+
+function formatStripeAddress(address = {}) {
+  return [address.line1, address.line2, address.postal_code, address.city, address.country].filter(Boolean).join(", ");
 }
 
 function isRealLead(lead) {
   return lead?.dataOrigin === "supabase" || lead?.externalSource === "supabase" || Boolean(lead?.supabaseId);
 }
 
+function isRealClient(client) {
+  return client?.dataOrigin === "stripe" || Boolean(client?.stripeCustomerId) || Boolean(client?.stripeSubscriptionId);
+}
+
 function clearDemoData() {
   const beforeLeads = state.leads.length;
   const realLeadIds = new Set(state.leads.filter(isRealLead).map((lead) => lead.id));
+  const realClientIds = new Set(state.clients.filter(isRealClient).map((client) => client.id));
   state = {
     ...state,
     leads: state.leads.filter(isRealLead),
-    clients: [],
-    tasks: state.tasks.filter((task) => task.relatedType === "lead" && realLeadIds.has(task.relatedId)),
-    interactions: state.interactions.filter((item) => item.relatedType === "lead" && realLeadIds.has(item.relatedId)),
-    proposals: state.proposals.filter((item) => realLeadIds.has(item.relatedLeadId)),
-    documents: state.documents.filter((item) => item.relatedType === "lead" && realLeadIds.has(item.relatedId)),
-    payments: [],
-    activityLog: state.activityLog.filter((item) => item.entityType === "lead" && realLeadIds.has(item.entityId)),
+    clients: state.clients.filter(isRealClient),
+    tasks: state.tasks.filter((task) => (task.relatedType === "lead" && realLeadIds.has(task.relatedId)) || (task.relatedType === "client" && realClientIds.has(task.relatedId))),
+    interactions: state.interactions.filter((item) => (item.relatedType === "lead" && realLeadIds.has(item.relatedId)) || (item.relatedType === "client" && realClientIds.has(item.relatedId))),
+    proposals: state.proposals.filter((item) => realLeadIds.has(item.relatedLeadId) || realClientIds.has(item.relatedClientId)),
+    documents: state.documents.filter((item) => (item.relatedType === "lead" && realLeadIds.has(item.relatedId)) || (item.relatedType === "client" && realClientIds.has(item.relatedId))),
+    payments: state.payments.filter((payment) => realClientIds.has(payment.clientId)),
+    activityLog: state.activityLog.filter((item) => (item.entityType === "lead" && realLeadIds.has(item.entityId)) || (item.entityType === "client" && realClientIds.has(item.entityId))),
     alerts: [],
   };
   saveState(state);
@@ -1401,12 +1530,15 @@ function proposalToFormData(proposal) {
 }
 
 function openModal(content) {
-  document.querySelector("#modal-root").innerHTML = content;
+  const modalRoot = document.querySelector("#modal-root");
+  if (!modalRoot) return;
+  modalRoot.innerHTML = content;
   document.body.classList.add("modal-open");
 }
 
 function closeModal() {
-  document.querySelector("#modal-root").innerHTML = "";
+  const modalRoot = document.querySelector("#modal-root");
+  if (modalRoot) modalRoot.innerHTML = "";
   document.body.classList.remove("modal-open");
 }
 
