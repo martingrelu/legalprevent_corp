@@ -51,9 +51,14 @@ Deno.serve(async (request) => {
 
     const body = await request.json();
     const plan = String(body.plan || "").toLowerCase();
-    const priceId = Deno.env.get(planEnvNames[plan] || "");
 
-    if (!planNames[plan] || !priceId) {
+    if (!planNames[plan]) {
+      return json({ error: "Plan no válido. Usa starter, pyme, business o gestorias." }, 400);
+    }
+
+    const priceId = Deno.env.get(planEnvNames[plan]);
+
+    if (!priceId) {
       return json({ error: "Plan no configurado en Stripe." }, 400);
     }
 
@@ -72,7 +77,9 @@ Deno.serve(async (request) => {
       "metadata[source]": "legalprevent_web",
       "subscription_data[metadata][plan]": plan,
       allow_promotion_codes: "true",
-      billing_address_collection: "auto"
+      "automatic_tax[enabled]": "true",
+      billing_address_collection: "required",
+      "tax_id_collection[enabled]": "true"
     });
 
     if (email) params.set("customer_email", email);

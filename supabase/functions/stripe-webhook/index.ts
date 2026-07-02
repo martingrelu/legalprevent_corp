@@ -36,9 +36,10 @@ const verifyStripeSignature = async (payload: string, signatureHeader: string, s
 const supabaseRequest = async (path: string, body: unknown) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!supabaseUrl || !serviceRoleKey) return;
+  if (!supabaseUrl) throw new Error("Missing SUPABASE_URL");
+  if (!serviceRoleKey) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
 
-  await fetch(`${supabaseUrl}${path}`, {
+  const response = await fetch(`${supabaseUrl}${path}`, {
     method: "POST",
     headers: {
       apikey: serviceRoleKey,
@@ -48,6 +49,11 @@ const supabaseRequest = async (path: string, body: unknown) => {
     },
     body: JSON.stringify(body)
   });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Supabase insert failed ${response.status}: ${detail}`);
+  }
 };
 
 Deno.serve(async (request) => {
@@ -61,48 +67,54 @@ Deno.serve(async (request) => {
   const valid = await verifyStripeSignature(rawBody, signature, webhookSecret);
   if (!valid) return new Response("Invalid signature", { status: 400 });
 
-  const event = JSON.parse(rawBody);
-  const object = event.data?.object || {};
+  try {
+    const event = JSON.parse(rawBody);
+    const object = event.data?.object || {};
+    console.info(`Stripe webhook received: ${event.type}`);
 
-  if (event.type === "checkout.session.completed") {
-    await supabaseRequest("/rest/v1/checkout_sessions?on_conflict=stripe_session_id", {
-      stripe_session_id: object.id,
-      stripe_customer_id: object.customer,
-      stripe_subscription_id: object.subscription,
-      plan: object.metadata?.plan || null,
-      status: object.status,
-      payment_status: object.payment_status,
-      customer_email: object.customer_details?.email || object.customer_email || null,
-      payload: object,
-      updated_at: new Date().toISOString()
-    });
-  }
+    if (event.type === "checkout.session.completed") {
+      await supabaseRequest("/rest/v1/checkout_sessions?on_conflict=stripe_session_id", {
+        stripe_session_id: object.id,
+        stripe_customer_id: object.customer,
+        stripe_subscription_id: object.subscription,
+        plan: object.metadata?.plan || null,
+        status: object.status,
+        payment_status: object.payment_status,
+        customer_email: object.customer_details?.email || object.customer_email || null,
+        payload: object,
+        updated_at: new Date().toISOString()
+      });
+    }
 
-  if (event.type?.startsWith("customer.subscription.")) {
-    await supabaseRequest("/rest/v1/subscriptions?on_conflict=stripe_subscription_id", {
-      stripe_subscription_id: object.id,
-      stripe_customer_id: object.customer,
-      plan: object.metadata?.plan || null,
-      status: object.status,
-      current_period_start: object.current_period_start ? new Date(object.current_period_start * 1000).toISOString() : null,
-      current_period_end: object.current_period_end ? new Date(object.current_period_end * 1000).toISOString() : null,
-      cancel_at_period_end: Boolean(object.cancel_at_period_end),
-      payload: object,
-      updated_at: new Date().toISOString()
-    });
-  }
+    if (event.type?.startsWith("customer.subscription.")) {
+      await supabaseRequest("/rest/v1/subscriptions?on_conflict=stripe_subscription_id", {
+        stripe_subscription_id: object.id,
+        stripe_customer_id: object.customer,
+        plan: object.metadata?.plan || null,
+        status: object.status,
+        current_period_start: object.current_period_start ? new Date(object.current_period_start * 1000).toISOString() : null,
+        current_period_end: object.current_period_end ? new Date(object.current_period_end * 1000).toISOString() : null,
+        cancel_at_period_end: Boolean(object.cancel_at_period_end),
+        payload: object,
+        updated_at: new Date().toISOString()
+      });
+    }
 
-  if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
-    await supabaseRequest("/rest/v1/payments?on_conflict=stripe_invoice_id", {
-      stripe_invoice_id: object.id,
-      stripe_customer_id: object.customer,
-      stripe_subscription_id: object.subscription,
-      amount_paid: object.amount_paid || 0,
-      currency: object.currency || "eur",
-      status: object.status,
-      hosted_invoice_url: object.hosted_invoice_url || null,
-      payload: object
-    });
+    if (event.type === "invoice.paid" || event.type === "invoice.payment_failed") {
+      await supabaseRequest("/rest/v1/payments?on_conflict=stripe_invoice_id", {
+        stripe_invoice_id: object.id,
+        stripe_customer_id: object.customer,
+        stripe_subscription_id: object.subscription,
+        amount_paid: object.amount_paid || 0,
+        currency: object.currency || "eur",
+        status: object.status,
+        hosted_invoice_url: object.hosted_invoice_url || null,
+        payload: object
+      });
+    }
+  } catch (error) {
+    console.error("Stripe webhook processing failed", error);
+    return new Response(error instanceof Error ? error.message : "Webhook processing failed", { status: 500 });
   }
 
   return new Response(JSON.stringify({ received: true }), {

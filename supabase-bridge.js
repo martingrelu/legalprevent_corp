@@ -209,6 +209,32 @@
     });
   };
 
+  const fetchBillingData = async () => {
+    const session = getSession();
+    if (!session?.access_token) throw new Error("Inicia sesión para ver datos de contratación.");
+
+    const [checkoutSessions, subscriptions, payments] = await Promise.all([
+      request("/rest/v1/checkout_sessions?select=*&order=created_at.desc", {
+        method: "GET",
+        accessToken: session.access_token
+      }),
+      request("/rest/v1/subscriptions?select=*&order=created_at.desc", {
+        method: "GET",
+        accessToken: session.access_token
+      }),
+      request("/rest/v1/payments?select=*&order=created_at.desc", {
+        method: "GET",
+        accessToken: session.access_token
+      })
+    ]);
+
+    return {
+      checkoutSessions: checkoutSessions || [],
+      subscriptions: subscriptions || [],
+      payments: payments || []
+    };
+  };
+
   window.LegalPreventSupabase = {
     isConfigured,
     createLead,
@@ -218,6 +244,7 @@
     signIn,
     signOut,
     getSession,
-    fetchLeads
+    fetchLeads,
+    fetchBillingData
   };
 })();

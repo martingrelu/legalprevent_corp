@@ -31,13 +31,13 @@
 
     <main class="thank-you-page">
       <section class="thank-you-card section-shell">
-        <span class="section-label">Solicitud recibida</span>
-        <h1>Gracias. Hemos recibido tu solicitud de demostración.</h1>
-        <p>
+        <span class="section-label" data-thanks-label>Solicitud recibida</span>
+        <h1 data-thanks-title>Gracias. Hemos recibido tu solicitud de demostración.</h1>
+        <p data-thanks-copy>
           Nuestro equipo revisará tus datos y te contactará para enseñarte cómo LEGAL PREVENT puede
           ayudarte a detectar riesgos, ordenar documentación y prevenir problemas antes de que ocurran.
         </p>
-        <div class="thank-you-steps">
+        <div class="thank-you-steps" data-thanks-steps>
           <article>
             <strong>1</strong>
             <span>Revisamos la solicitud</span>
@@ -52,8 +52,8 @@
           </article>
         </div>
         <div class="lead-actions">
-          <a class="btn btn-primary" href="../diagnostico/">Completar diagnóstico gratuito</a>
-          <a class="btn btn-secondary" href="../">Volver a la web</a>
+          <a class="btn btn-primary" href="../diagnostico/" data-thanks-primary>Completar diagnóstico gratuito</a>
+          <a class="btn btn-secondary" href="../" data-thanks-secondary>Volver a la web</a>
         </div>
       </section>
     </main>
@@ -77,6 +77,40 @@
 
     <script>
       document.querySelector("#year").textContent = new Date().getFullYear();
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("origen") === "stripe") {
+        const plan = params.get("plan");
+        const planLabel = {
+          starter: "Starter",
+          pyme: "Pyme",
+          business: "Business",
+          gestorias: "Gestorías",
+          partner: "Gestorías",
+        }[plan] || "LEGAL PREVENT";
+
+        document.title = "Contratación recibida | LEGAL PREVENT";
+        document.querySelector("[data-thanks-label]").textContent = "Contratación recibida";
+        document.querySelector("[data-thanks-title]").textContent = `Gracias. Hemos recibido tu contratación ${planLabel}.`;
+        document.querySelector("[data-thanks-copy]").textContent =
+          "El pago se ha procesado correctamente. Te enviaremos las instrucciones de acceso y los próximos pasos para activar tu espacio de trabajo.";
+        document.querySelector("[data-thanks-steps]").innerHTML = `
+          <article>
+            <strong>1</strong>
+            <span>Confirmamos el pago</span>
+          </article>
+          <article>
+            <strong>2</strong>
+            <span>Preparamos tu acceso</span>
+          </article>
+          <article>
+            <strong>3</strong>
+            <span>Activamos la plataforma</span>
+          </article>
+        `;
+        document.querySelector("[data-thanks-primary]").textContent = "Ir a LegalPrevent";
+        document.querySelector("[data-thanks-primary]").href = "https://legalprevent.legal/";
+        document.querySelector("[data-thanks-secondary]").textContent = "Volver a la web";
+      }
     </script>
   </body>
 </html>

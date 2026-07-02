@@ -132,6 +132,14 @@ supabase/functions/create-checkout-session/index.ts
 supabase/functions/stripe-webhook/index.ts
 ```
 
+Nota operativa: si en Supabase la función de checkout se ha desplegado con el nombre `super-api`, la web debe llamar a:
+
+```text
+https://wtpfrlsbfishvworjdtr.supabase.co/functions/v1/super-api
+```
+
+Ese es el endpoint activo configurado actualmente en `supabase-bridge.js`.
+
 Despliegue recomendado:
 
 ```bash
