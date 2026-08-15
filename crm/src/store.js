@@ -369,6 +369,13 @@ export function upsertLead(state, formData, id = "") {
 
   validateLead(payload);
 
+  const duplicate = next.leads.find(
+    (lead) => lead.id !== id && String(lead.email || "").toLowerCase() === payload.email,
+  );
+  if (duplicate) {
+    throw new Error(`Ya existe un lead con el email ${payload.email}. Abre su ficha para actualizarlo.`);
+  }
+
   if (current) {
     Object.assign(current, payload, { lastInteractionAt: new Date().toISOString() });
     logActivity(next, "lead", current.id, "update", "Lead actualizado.");
@@ -645,3 +652,4 @@ export function filteredClients(state, filters) {
     return matchesQuery && matchesStatus && matchesPlan && matchesOwner;
   });
 }
+  
