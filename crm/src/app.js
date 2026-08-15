@@ -38,13 +38,16 @@ import {
   updateClient,
   updateLeadStatus,
   upsertLead,
+  validateLead,
   upsertProposal,
   upsertTask,
 } from "./store.js";
+import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();
 let toastTimer = null;
+let csvImportSession = null;
 
 const app = document.querySelector("#app");
 
@@ -199,6 +202,7 @@ function renderTopbar(user) {
         }
         <button class="secondary-button" data-action="export-backup">Exportar copia</button>
         <button class="secondary-button" data-action="open-import-backup">Importar copia</button>
+        <button class="secondary-button" data-action="open-csv-import">Importar CSV</button>
         <button class="ghost-button" data-action="reset-demo">Restaurar demo</button>
         <button class="primary-button" data-action="open-lead-modal">Nuevo lead</button>
       </div>
@@ -950,6 +954,128 @@ function renderLeadModal(lead = null) {
   );
 }
 
+function renderCsvImportModal() {
+  if (!csvImportSession) {
+    return modal(
+      "Importar leads desde CSV",
+      `<div class="csv-import-intro">
+        <p>Selecciona un CSV de contactos. Antes de guardar podrás revisar las columnas, los errores y los duplicados.</p>
+        <button class="secondary-button" type="button" data-action="download-csv-template">Descargar plantilla CSV</button>
+      </div>
+      <form class="modal-form" data-form="csv-file">
+        <label class="csv-dropzone">Archivo CSV
+          <input name="csvFile" type="file" accept=".csv,text/csv" required />
+          <span>Admite archivos separados por comas o punto y coma.</span>
+        </label>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
+          <button class="primary-button" type="submit">Analizar archivo</button>
+        </div>
+      </form>`,
+      "modal-wide",
+    );
+  }
+
+  const { fileName, parsed, mapping } = csvImportSession;
+  const preview = buildCsvPreview(mapping);
+  return modal(
+    "Revisar importación CSV",
+    `<form class="modal-form" data-form="csv-import">
+      <div class="csv-summary">
+        <strong>${escapeHtml(fileName)}</strong>
+        <span>${parsed.rows.length} filas encontradas</span>
+      </div>
+      <p class="form-help">Asocia cada campo del CRM con la columna correspondiente del archivo.</p>
+      <div class="csv-mapping-grid">
+        ${CSV_LEAD_FIELDS.map((field) => `
+          <label>${escapeHtml(field.label)}${field.required ? " *" : ""}
+            <select name="map_${field.key}" data-action="csv-mapping" data-field="${field.key}">
+              <option value="-1">No importar</option>
+              ${parsed.headers.map((header, index) => `<option value="${index}" ${Number(mapping[field.key]) === index ? "selected" : ""}>${escapeHtml(header)}</option>`).join("")}
+            </select>
+          </label>`).join("")}
+      </div>
+      <label>Si el email ya existe
+        <select name="duplicateStrategy">
+          <option value="skip">Omitir el contacto duplicado</option>
+          <option value="update">Actualizar el contacto existente</option>
+        </select>
+      </label>
+      <div class="csv-preview">
+        <div class="csv-preview-heading">
+          <strong>Vista previa</strong>
+          <span>${preview.valid} válidas · ${preview.invalid} con errores · ${preview.duplicates} duplicadas</span>
+        </div>
+        ${renderCsvPreviewRows(preview.rows)}
+      </div>
+      <p class="form-help">Las filas con errores no se importarán. Podrás ver un resumen al terminar.</p>
+      <div class="modal-actions">
+        <button class="ghost-button" type="button" data-action="replace-csv-file">Elegir otro archivo</button>
+        <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
+        <button class="primary-button" type="submit" ${preview.valid === 0 ? "disabled" : ""}>Importar ${preview.valid} leads</button>
+      </div>
+    </form>`,
+    "modal-wide",
+  );
+}
+
+function csvDefaults() {
+  return {
+    source: "Otro",
+    status: "Nuevo",
+    priority: "Media",
+    ownerId: getCurrentUser(state).id,
+    recommendedPlan: "Pro",
+    estimatedMonthlyRevenue: 590,
+    riskScore: 50,
+  };
+}
+
+function normalizeCsvLead(lead) {
+  return {
+    ...lead,
+    employees: Number(lead.employees || 0),
+    estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0),
+    riskScore: Number(lead.riskScore || 0),
+    nextActionAt: lead.nextActionAt ? new Date(lead.nextActionAt).toISOString() : "",
+  };
+}
+
+function buildCsvPreview(mapping) {
+  const seen = new Set(state.leads.map((lead) => String(lead.email || "").trim().toLowerCase()));
+  const rows = csvImportSession.parsed.rows.map((row) => {
+    let lead;
+    let error = "";
+    let duplicate = false;
+    try {
+      lead = normalizeCsvLead(mapCsvRow(row, mapping, csvDefaults()));
+      validateLead(lead);
+      const email = String(lead.email || "").trim().toLowerCase();
+      duplicate = seen.has(email);
+      seen.add(email);
+    } catch (validationError) {
+      error = validationError.message;
+    }
+    return { line: row.line, lead: lead || {}, error, duplicate };
+  });
+  return {
+    rows,
+    valid: rows.filter((row) => !row.error).length,
+    invalid: rows.filter((row) => row.error).length,
+    duplicates: rows.filter((row) => row.duplicate && !row.error).length,
+  };
+}
+
+function renderCsvPreviewRows(rows) {
+  return `<div class="table-wrap"><table class="csv-preview-table">
+    <thead><tr><th>Fila</th><th>Empresa</th><th>Contacto</th><th>Email</th><th>Resultado</th></tr></thead>
+    <tbody>${rows.slice(0, 50).map((row) => `<tr class="${row.error ? "csv-row-error" : ""}">
+      <td>${row.line}</td><td>${escapeHtml(row.lead.companyName || "—")}</td><td>${escapeHtml(row.lead.contactName || "—")}</td>
+      <td>${escapeHtml(row.lead.email || "—")}</td><td>${row.error ? escapeHtml(row.error) : row.duplicate ? "Duplicado" : "Lista para importar"}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>${rows.length > 50 ? `<p class="form-help">Se muestran las primeras 50 de ${rows.length} filas.</p>` : ""}`;
+}
+
 function renderClientModal(client) {
   return modal(
     "Editar cliente",
@@ -1159,6 +1285,22 @@ async function handleSubmit(event) {
       return;
     }
 
+    if (formType === "csv-file") {
+      const file = form.elements.csvFile.files[0];
+      if (!file) throw new Error("Selecciona un archivo CSV.");
+      if (file.size > 5 * 1024 * 1024) throw new Error("El archivo supera el límite de 5 MB.");
+      const parsed = parseCsv(await file.text());
+      if (parsed.rows.length > 2000) throw new Error("El CSV supera el límite de 2.000 contactos por importación.");
+      csvImportSession = { fileName: file.name, parsed, mapping: suggestMapping(parsed.headers) };
+      openModal(renderCsvImportModal());
+      return;
+    }
+
+    if (formType === "csv-import") {
+      await importCsvLeads(form);
+      return;
+    }
+
     if (formType === "supabase-login") {
       const formData = new FormData(form);
       await window.LegalPreventSupabase.signIn(formData.get("email"), formData.get("password"));
@@ -1229,6 +1371,15 @@ function handleClick(event) {
   if (action === "clear-demo-data") clearDemoData();
   if (action === "export-backup") exportBackup();
   if (action === "open-import-backup") openModal(renderImportBackupModal());
+  if (action === "open-csv-import") {
+    csvImportSession = null;
+    openModal(renderCsvImportModal());
+  }
+  if (action === "replace-csv-file") {
+    csvImportSession = null;
+    openModal(renderCsvImportModal());
+  }
+  if (action === "download-csv-template") downloadCsvTemplate();
   if (action === "open-supabase-login") openModal(renderSupabaseLoginModal());
   if (action === "sync-supabase") syncSupabaseData();
   if (action === "supabase-logout") {
@@ -1492,6 +1643,11 @@ function exportBackup() {
 
 async function handleChange(event) {
   const target = event.target;
+  if (target.dataset.action === "csv-mapping" && csvImportSession) {
+    csvImportSession.mapping[target.dataset.field] = Number(target.value);
+    openModal(renderCsvImportModal());
+    return;
+  }
   if (target.dataset.action === "switch-user") {
     state.currentUserId = target.value;
     saveState(state);
@@ -1579,16 +1735,71 @@ function openModal(content) {
   document.body.classList.add("modal-open");
 }
 
+async function importCsvLeads(form) {
+  if (!csvImportSession) throw new Error("Selecciona de nuevo el archivo CSV.");
+  const formData = new FormData(form);
+  const mapping = Object.fromEntries(CSV_LEAD_FIELDS.map((field) => [field.key, Number(formData.get(`map_${field.key}`))]));
+  csvImportSession.mapping = mapping;
+  const preview = buildCsvPreview(mapping);
+  const duplicateStrategy = formData.get("duplicateStrategy") === "update" ? "update" : "skip";
+  let imported = 0;
+  let updated = 0;
+  let skipped = preview.invalid;
+  const errors = [];
+
+  for (const row of preview.rows) {
+    if (row.error) continue;
+    const email = String(row.lead.email || "").trim().toLowerCase();
+    const existing = state.leads.find((lead) => String(lead.email || "").trim().toLowerCase() === email);
+    if (existing && duplicateStrategy === "skip") {
+      skipped += 1;
+      continue;
+    }
+
+    const previousState = state;
+    try {
+      const nextState = upsertLead(state, createLeadFormData(row.lead), existing?.id || "");
+      const savedLead = existing ? nextState.leads.find((lead) => lead.id === existing.id) : nextState.leads[0];
+      const remoteLead = await window.LegalPreventSupabase.saveCrmLead(savedLead);
+      Object.assign(savedLead, { supabaseId: remoteLead.id, dataOrigin: "supabase", externalSource: "supabase" });
+      saveState(nextState);
+      state = nextState;
+      if (existing) updated += 1;
+      else imported += 1;
+    } catch (error) {
+      state = previousState;
+      saveState(previousState);
+      skipped += 1;
+      errors.push(`Fila ${row.line}: ${error.message}`);
+    }
+  }
+
+  csvImportSession = null;
+  closeModal();
+  render();
+  const detail = errors.length ? ` ${errors.slice(0, 3).join(" · ")}` : "";
+  showToast(`${imported} importados, ${updated} actualizados y ${skipped} omitidos.${detail}`, errors.length ? "error" : "success");
+}
+
+function downloadCsvTemplate() {
+  const blob = new Blob(["\uFEFF", csvTemplate()], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "plantilla-leads-legalprevent.csv";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 function closeModal() {
   const modalRoot = document.querySelector("#modal-root");
   if (modalRoot) modalRoot.innerHTML = "";
   document.body.classList.remove("modal-open");
 }
 
-function modal(title, body) {
+function modal(title, body, extraClass = "") {
   return `
     <div class="modal-backdrop" data-action="close-modal"></div>
-    <section class="modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
+    <section class="modal ${extraClass}" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
       <header>
         <h2>${title}</h2>
         <button class="icon-button" data-action="close-modal" aria-label="Cerrar">x</button>
@@ -1736,4 +1947,3 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return escapeHtml(value);
 }
-  
