@@ -279,7 +279,7 @@ export function leadScore(lead) {
   if (lead.priority === "Media") score += 15;
   if (["Demo agendada", "Demo realizada", "Propuesta enviada", "Negociacion"].includes(lead.status)) score += 30;
   if (lead.riskScore >= 75) score += 20;
-  if (lead.estimatedMonthlyRevenue >= 590) score += 20;
+  if (lead.revenueConfirmed === true && lead.estimatedMonthlyRevenue >= 149) score += 20;
   if (daysBetween(lead.lastInteractionAt) <= 3) score += 10;
   return Math.min(score, 100);
 }
@@ -364,6 +364,7 @@ export function upsertLead(state, formData, id = "") {
     ownerId: sanitizeText(formData.get("ownerId")),
     recommendedPlan: sanitizeText(formData.get("recommendedPlan")),
     estimatedMonthlyRevenue: Number(formData.get("estimatedMonthlyRevenue") || 0),
+    revenueConfirmed: Number(formData.get("estimatedMonthlyRevenue") || 0) > 0,
     riskScore: Number(formData.get("riskScore") || 0),
   };
 
@@ -398,7 +399,7 @@ export function validateLead(lead) {
   if (!isValidEmail(lead.email)) throw new Error("El email del lead no tiene un formato valido.");
   if (!LEAD_STATUSES.includes(lead.status)) throw new Error("Estado de lead no valido.");
   if (!PRIORITIES.includes(lead.priority)) throw new Error("Prioridad no valida.");
-  if (!PLANS.includes(lead.recommendedPlan)) throw new Error("Plan recomendado no valido.");
+  if (lead.recommendedPlan && !PLANS.includes(lead.recommendedPlan)) throw new Error("Plan recomendado no valido.");
   if (lead.riskScore < 0 || lead.riskScore > 100) throw new Error("El riesgo debe estar entre 0 y 100.");
 }
 
@@ -518,15 +519,6 @@ export function convertLeadToClient(state, leadId, options = {}) {
   if (!lead) return state;
   if (lead.convertedClientId && next.clients.some((client) => client.id === lead.convertedClientId)) return next;
 
-  const priceByPlan = {
-    Starter: 29,
-    Pyme: 79,
-    Business: 149,
-    Gestorías: 199,
-    Pro: 590,
-    Premium: 990,
-    Personalizado: lead.estimatedMonthlyRevenue || 1200,
-  };
   const id = createId("client");
   const signup = new Date();
   const renewal = new Date();
@@ -540,8 +532,8 @@ export function convertLeadToClient(state, leadId, options = {}) {
     address: lead.city,
     primaryContact: lead.contactName,
     billingEmail: lead.email,
-    plan: lead.recommendedPlan,
-    monthlyPrice: priceByPlan[lead.recommendedPlan] || lead.estimatedMonthlyRevenue || 590,
+    plan: lead.recommendedPlan || "Personalizado",
+    monthlyPrice: lead.revenueConfirmed === true ? Number(lead.estimatedMonthlyRevenue || 0) : 0,
     signupDate: signup.toISOString(),
     renewalDate: renewal.toISOString(),
     status: "Activo",
@@ -652,4 +644,3 @@ export function filteredClients(state, filters) {
     return matchesQuery && matchesStatus && matchesPlan && matchesOwner;
   });
 }
-  

@@ -131,7 +131,7 @@ export function createLeadFormData(lead) {
 export function csvTemplate() {
   return [
     CSV_LEAD_FIELDS.map((field) => `"${field.label}"`).join(","),
-    ['Gestoría Ejemplo', 'Ana Pérez', 'ana@ejemplo.es', '600123123', 'Servicios profesionales', '8', 'Madrid', 'Referido', 'Nuevo', 'Alta', '2026-09-01', 'Llamar para presentar LegalPrevent', 'Interesada en ampliar servicios', 'Pro', '590', '45']
+    ['Gestoría Ejemplo', 'Ana Pérez', 'ana@ejemplo.es', '600123123', 'Servicios profesionales', '8', 'Madrid', 'Referido', 'Nuevo', 'Alta', '2026-09-01', 'Llamar para presentar LegalPrevent', 'Interesada en ampliar servicios', 'Pyme', '79', '45']
       .map((value) => `"${String(value).replace(/"/g, '""')}"`)
       .join(","),
   ].join("\r\n");

@@ -230,7 +230,8 @@
       nextAction: lead.nextAction || "",
       notes: lead.notes || "",
       ownerId: lead.ownerId || "",
-      estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0)
+      estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0),
+      revenueConfirmed: lead.revenueConfirmed === true
     }
   });
 
@@ -310,4 +311,3 @@
     saveCrmLead
   };
 })();
-  
