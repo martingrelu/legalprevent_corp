@@ -209,6 +209,67 @@
     });
   };
 
+  const buildCrmLeadRecord = (lead) => ({
+    source: lead.source || "CRM manual",
+    stage: lead.status || "Nuevo",
+    company_name: lead.companyName || "",
+    contact_name: lead.contactName || "",
+    email: String(lead.email || "").trim().toLowerCase(),
+    phone: lead.phone || "",
+    sector: lead.sector || "",
+    employees: Number(lead.employees || 0) || null,
+    status: lead.status || "Nuevo",
+    priority: lead.priority || "Media",
+    risk_score: Number(lead.riskScore || 0),
+    recommended_plan: lead.recommendedPlan || "",
+    page_url: window.location.href,
+    payload: {
+      origin: "crm_manual",
+      city: lead.city || "",
+      nextActionAt: lead.nextActionAt || "",
+      nextAction: lead.nextAction || "",
+      notes: lead.notes || "",
+      ownerId: lead.ownerId || "",
+      estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0)
+    }
+  });
+
+  const saveCrmLead = async (lead) => {
+    const session = getSession();
+    if (!session?.access_token) throw new Error("Conecta Supabase antes de guardar un lead manual.");
+
+    const record = buildCrmLeadRecord(lead);
+    if (!record.email) throw new Error("El email del lead es obligatorio.");
+
+    let supabaseId = lead.supabaseId || "";
+    if (!supabaseId) {
+      const email = encodeURIComponent(record.email);
+      const existing = await request(`/rest/v1/leads?select=id&email=eq.${email}&limit=1`, {
+        method: "GET",
+        accessToken: session.access_token
+      });
+      supabaseId = existing?.[0]?.id || "";
+    }
+
+    if (supabaseId) {
+      const rows = await request(`/rest/v1/leads?id=eq.${encodeURIComponent(supabaseId)}`, {
+        method: "PATCH",
+        accessToken: session.access_token,
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify(record)
+      });
+      return rows?.[0] || { id: supabaseId, ...record };
+    }
+
+    const rows = await request("/rest/v1/leads", {
+      method: "POST",
+      accessToken: session.access_token,
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(record)
+    });
+    return rows?.[0] || record;
+  };
+
   const fetchBillingData = async () => {
     const session = getSession();
     if (!session?.access_token) throw new Error("Inicia sesión para ver datos de contratación.");
@@ -245,6 +306,8 @@
     signOut,
     getSession,
     fetchLeads,
-    fetchBillingData
+    fetchBillingData,
+    saveCrmLead
   };
 })();
+  
