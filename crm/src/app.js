@@ -49,6 +49,16 @@ let view = parseRoute();
 let toastTimer = null;
 let csvImportSession = null;
 
+const LEAD_PLAN_PRICES = {
+  Starter: 29,
+  Pyme: 79,
+  Business: 149,
+  "Gestorías": 199,
+  Pro: 590,
+  Premium: 990,
+};
+const LEAD_PLAN_OPTIONS = [["", "Pendiente"], ...PLANS.map((plan) => [plan, plan])];
+
 const app = document.querySelector("#app");
 
 window.addEventListener("hashchange", () => {
@@ -464,7 +474,7 @@ function renderLeadTableRow(lead) {
       <td>${escapeHtml(lead.source)}</td>
       <td>${escapeHtml(owner?.name || "Sin asignar")}</td>
       <td>${escapeHtml(lead.nextAction)}<small>${formatDate(lead.nextActionAt)}</small></td>
-      <td>${formatCurrency(lead.estimatedMonthlyRevenue)}</td>
+      <td>${leadRevenueLabel(lead)}</td>
     </tr>
   `;
 }
@@ -488,7 +498,7 @@ function renderPipeline() {
 
 function renderPipelineColumn(column) {
   const items = state.leads.filter((lead) => mapLeadStatusToPipeline(lead.status) === column);
-  const revenue = items.reduce((sum, lead) => sum + Number(lead.estimatedMonthlyRevenue || 0), 0);
+  const revenue = items.reduce((sum, lead) => sum + confirmedLeadRevenue(lead), 0);
   return `
     <article class="kanban-column" data-drop-status="${column}">
       <header>
@@ -511,7 +521,7 @@ function renderPipelineCard(lead) {
       </a>
       <div class="card-meta">
         ${badge(lead.priority, `priority-${lead.priority.toLowerCase()}`)}
-        <span>${formatCurrency(lead.estimatedMonthlyRevenue)}</span>
+        <span>${leadRevenueLabel(lead)}</span>
       </div>
       <label>
         Estado
@@ -568,7 +578,8 @@ function renderLeadDetail(id) {
             ["Creacion", formatDate(lead.createdAt)],
             ["Ultima interaccion", formatDateTime(lead.lastInteractionAt)],
             ["Proxima accion", `${lead.nextAction} · ${formatDate(lead.nextActionAt)}`],
-            ["Plan recomendado", lead.recommendedPlan],
+            ["Plan recomendado", lead.recommendedPlan || "Pendiente"],
+            ["MRR estimado", leadRevenueLabel(lead)],
             ["Riesgo detectado", `${lead.riskScore}/100`],
           ])}
         </article>
@@ -918,8 +929,8 @@ function renderLeadModal(lead = null) {
     nextAction: "",
     notes: "",
     ownerId: getCurrentUser(state).id,
-    recommendedPlan: "Pro",
-    estimatedMonthlyRevenue: 590,
+    recommendedPlan: "",
+    estimatedMonthlyRevenue: "",
     riskScore: 50,
   };
   return modal(
@@ -940,8 +951,8 @@ function renderLeadModal(lead = null) {
           ${dateField("nextActionAt", "Proxima accion fecha", item.nextActionAt)}
           ${inputField("nextAction", "Proxima accion", item.nextAction)}
           ${selectField("ownerId", state.users.map((user) => [user.id, user.name]), item.ownerId, "Responsable")}
-          ${selectField("recommendedPlan", PLANS, item.recommendedPlan, "Plan recomendado")}
-          ${inputField("estimatedMonthlyRevenue", "MRR estimado", item.estimatedMonthlyRevenue, "number")}
+          ${selectField("recommendedPlan", LEAD_PLAN_OPTIONS, item.recommendedPlan, "Plan previsto")}
+          ${inputField("estimatedMonthlyRevenue", "MRR estimado (editable)", item.revenueConfirmed ? item.estimatedMonthlyRevenue : "", "number")}
           ${inputField("riskScore", "Riesgo detectado 0-100", item.riskScore, "number")}
           <label class="full-field">Notas internas<textarea name="notes">${escapeHtml(item.notes || "")}</textarea></label>
         </div>
@@ -1025,17 +1036,18 @@ function csvDefaults() {
     status: "Nuevo",
     priority: "Media",
     ownerId: getCurrentUser(state).id,
-    recommendedPlan: "Pro",
-    estimatedMonthlyRevenue: 590,
+    recommendedPlan: "",
+    estimatedMonthlyRevenue: 0,
     riskScore: 50,
   };
 }
 
 function normalizeCsvLead(lead) {
+  const selectedPlanPrice = LEAD_PLAN_PRICES[lead.recommendedPlan];
   return {
     ...lead,
     employees: Number(lead.employees || 0),
-    estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0),
+    estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || selectedPlanPrice || 0),
     riskScore: Number(lead.riskScore || 0),
     nextActionAt: lead.nextActionAt ? new Date(lead.nextActionAt).toISOString() : "",
   };
@@ -1453,8 +1465,9 @@ async function syncSupabaseData() {
         nextAction: crmPayload.nextAction || "Contactar lead captado desde la web.",
         notes: crmPayload.notes || `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
         ownerId: crmPayload.ownerId || getCurrentUser(state).id,
-        recommendedPlan: row.recommended_plan || "Pro",
-        estimatedMonthlyRevenue: crmPayload.estimatedMonthlyRevenue ?? (row.recommended_plan === "Starter" ? 29 : row.recommended_plan === "Business" ? 149 : 79),
+        recommendedPlan: row.recommended_plan || "",
+        estimatedMonthlyRevenue: Number(crmPayload.estimatedMonthlyRevenue || 0),
+        revenueConfirmed: Boolean(crmPayload.revenueConfirmed),
         riskScore: row.risk_score || 0,
         convertedClientId: "",
       };
@@ -1643,6 +1656,14 @@ function exportBackup() {
 
 async function handleChange(event) {
   const target = event.target;
+  if (target.name === "recommendedPlan") {
+    const form = target.closest("form");
+    const revenueInput = form?.querySelector("[name='estimatedMonthlyRevenue']");
+    if (revenueInput) {
+      revenueInput.value = LEAD_PLAN_PRICES[target.value] ?? "";
+    }
+    return;
+  }
   if (target.dataset.action === "csv-mapping" && csvImportSession) {
     csvImportSession.mapping[target.dataset.field] = Number(target.value);
     openModal(renderCsvImportModal());
@@ -1851,6 +1872,16 @@ function selectField(name, options, value, label, allowEmpty = false) {
 function badge(text, extraClass = "") {
   const normalized = String(text).toLowerCase().replace(/\s+/g, "-");
   return `<span class="badge status-${normalized} ${extraClass}">${escapeHtml(text)}</span>`;
+}
+
+function confirmedLeadRevenue(lead) {
+  if (lead?.revenueConfirmed !== true) return 0;
+  return Number(lead.estimatedMonthlyRevenue || 0);
+}
+
+function leadRevenueLabel(lead) {
+  const amount = confirmedLeadRevenue(lead);
+  return amount > 0 ? formatCurrency(amount) : "Importe pendiente";
 }
 
 function keyValues(rows) {
