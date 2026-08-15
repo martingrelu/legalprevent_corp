@@ -118,9 +118,9 @@ function renderAuthGate() {
     <main class="auth-gate">
       <section class="auth-card">
         <a class="brand" href="../" aria-label="LEGAL PREVENT inicio">
-          <span class="brand-mark">LP</span>
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
           <span>
-            <strong>LegalPrevent</strong>
+            <strong>LEGAL PREVENT</strong>
             <small>CRM privado</small>
           </span>
         </a>
@@ -155,9 +155,9 @@ function renderSidebar(user) {
   return `
     <aside class="sidebar">
       <a class="brand" href="#/dashboard" aria-label="LegalPrevent CRM">
-        <span class="brand-mark">LP</span>
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
         <span>
-          <strong>LegalPrevent</strong>
+          <strong>LEGAL PREVENT</strong>
           <small>CRM interno</small>
         </span>
       </a>

@@ -1,17 +1,18 @@
 :root {
-  --ink: #18212f;
-  --muted: #647084;
-  --line: #d9e0ea;
-  --soft: #f5f7fb;
+  --ink: #081735;
+  --muted: #60708a;
+  --line: #dbe6f7;
+  --soft: #f4f7fc;
   --paper: #ffffff;
-  --navy: #102a43;
-  --navy-2: #183a5a;
-  --teal: #0f766e;
+  --navy: #061536;
+  --navy-2: #0d2558;
+  --teal: #155eef;
   --green: #16803c;
   --orange: #b45309;
   --red: #b42318;
-  --blue: #2563eb;
-  --shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+  --blue: #135cff;
+  --brand-light: #a8c8ff;
+  --shadow: 0 18px 45px rgba(6, 21, 54, 0.09);
   --radius: 8px;
 }
 
@@ -34,8 +35,8 @@ body {
   place-items: center;
   padding: 24px;
   background:
-    radial-gradient(circle at 18% 18%, rgba(37, 99, 235, 0.14), transparent 34%),
-    linear-gradient(135deg, #f8fafc 0%, #eef4ff 100%);
+    radial-gradient(circle at 18% 18%, rgba(19, 92, 255, 0.17), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #edf4ff 100%);
 }
 
 .auth-card {
@@ -46,7 +47,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
-  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 28px 80px rgba(6, 21, 54, 0.16);
 }
 
 .auth-card h1,
@@ -101,7 +102,7 @@ select {
   top: 0;
   height: 100vh;
   padding: 22px;
-  background: var(--navy);
+  background: linear-gradient(180deg, #061536 0%, #0a1d45 100%);
   color: #eef5ff;
   display: flex;
   flex-direction: column;
@@ -116,15 +117,30 @@ select {
 }
 
 .brand-mark {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: #d9f99d;
-  color: #16321f;
-  font-weight: 900;
-  letter-spacing: 0;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 2px solid var(--brand-light);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(6, 21, 54, 0.16);
+}
+
+.brand-mark span {
+  width: 24px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--blue);
+}
+
+.brand-mark span:last-child {
+  width: 20px;
+  background: var(--navy);
 }
 
 .brand strong,
@@ -132,9 +148,15 @@ select {
   display: block;
 }
 
+.brand strong {
+  font-size: 0.94rem;
+  line-height: 1.08;
+  letter-spacing: 0.045em;
+}
+
 .brand small,
 .role-card small {
-  color: #bdd0e4;
+  color: #b9cbea;
 }
 
 .nav {
@@ -148,7 +170,7 @@ select {
   gap: 10px;
   padding: 11px 12px;
   border-radius: 8px;
-  color: #dce8f5;
+  color: #dce8ff;
   transition:
     background 0.16s ease,
     color 0.16s ease;
@@ -156,7 +178,7 @@ select {
 
 .nav a:hover,
 .nav a.active {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(19, 92, 255, 0.32);
   color: #ffffff;
 }
 
@@ -164,7 +186,8 @@ select {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #72e6c9;
+  background: #69a1ff;
+  box-shadow: 0 0 0 3px rgba(105, 161, 255, 0.15);
 }
 
 .role-card {
@@ -178,7 +201,7 @@ select {
 }
 
 .role-card span {
-  color: #d9f99d;
+  color: #8eb9ff;
 }
 
 .main {
@@ -194,7 +217,7 @@ select {
   display: flex;
   align-items: center;
   gap: 18px;
-  background: rgba(245, 247, 251, 0.9);
+  background: rgba(244, 247, 252, 0.92);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--line);
 }
@@ -633,12 +656,13 @@ tbody tr {
 }
 
 .primary-button {
-  background: var(--navy);
+  background: var(--blue);
   color: #ffffff;
+  box-shadow: 0 8px 20px rgba(19, 92, 255, 0.2);
 }
 
 .primary-button:hover {
-  background: var(--navy-2);
+  background: #0648d8;
 }
 
 .secondary-button,
@@ -790,8 +814,8 @@ tbody tr {
 }
 
 .score-badge {
-  background: #ccfbf1;
-  color: var(--teal);
+  background: #e5efff;
+  color: var(--blue);
 }
 
 .score {
@@ -800,8 +824,8 @@ tbody tr {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  color: #073b34;
-  background: #b7f7e7;
+  color: #073885;
+  background: #d8e8ff;
   font-weight: 900;
 }
 
