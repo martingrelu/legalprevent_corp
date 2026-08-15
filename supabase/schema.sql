@@ -126,7 +126,7 @@ alter table public.payments enable row level security;
 grant usage on schema public to anon, authenticated;
 grant insert on public.leads to anon;
 grant insert on public.diagnostics to anon;
-grant select, update on public.leads to authenticated;
+grant select, insert, update on public.leads to authenticated;
 grant select on public.diagnostics to authenticated;
 grant select on public.checkout_sessions to authenticated;
 grant select on public.subscriptions to authenticated;
@@ -152,6 +152,13 @@ on public.leads
 for update
 to authenticated
 using (true)
+with check (true);
+
+drop policy if exists "Authenticated users can create CRM leads" on public.leads;
+create policy "Authenticated users can create CRM leads"
+on public.leads
+for insert
+to authenticated
 with check (true);
 
 drop policy if exists "Public web can create diagnostics" on public.diagnostics;
@@ -293,3 +300,4 @@ $$;
 
 grant execute on function public.submit_lead(jsonb) to anon, authenticated;
 grant execute on function public.submit_diagnostic(jsonb) to anon, authenticated;
+  
