@@ -1169,7 +1169,29 @@ async function handleSubmit(event) {
     }
 
     const formData = new FormData(form);
-    if (formType === "lead") state = upsertLead(state, formData, form.dataset.id);
+    if (formType === "lead") {
+      const previousState = state;
+      const previousId = form.dataset.id;
+      const nextState = upsertLead(state, formData, previousId);
+      const savedLead = previousId
+        ? nextState.leads.find((lead) => lead.id === previousId)
+        : nextState.leads[0];
+
+      try {
+        const remoteLead = await window.LegalPreventSupabase.saveCrmLead(savedLead);
+        Object.assign(savedLead, {
+          supabaseId: remoteLead.id,
+          dataOrigin: "supabase",
+          externalSource: "supabase"
+        });
+        saveState(nextState);
+        state = nextState;
+      } catch (error) {
+        saveState(previousState);
+        state = previousState;
+        throw error;
+      }
+    }
     if (formType === "task") state = upsertTask(state, formData, form.dataset.id);
     if (formType === "proposal") state = upsertProposal(state, formData, form.dataset.id);
     if (formType === "interaction") state = addInteraction(state, formData);
@@ -1258,6 +1280,7 @@ async function syncSupabaseData() {
 
     rows.forEach((row) => {
       const existingIndex = state.leads.findIndex((lead) => lead.email === row.email);
+      const crmPayload = row.payload?.origin === "crm_manual" ? row.payload : {};
       const lead = {
         id: state.leads[existingIndex]?.id || `lead-${row.id}`,
         supabaseId: row.id,
@@ -1269,18 +1292,18 @@ async function syncSupabaseData() {
         phone: row.phone || "",
         sector: row.sector || "Pendiente",
         employees: row.employees || "",
-        city: "",
-        source: "Web",
+        city: crmPayload.city || "",
+        source: row.source || "Web",
         status: row.status || "Nuevo",
         priority: row.priority || "Media",
         createdAt: row.created_at || now,
         lastInteractionAt: row.created_at || now,
-        nextActionAt: row.next_action_at || now,
-        nextAction: "Contactar lead captado desde la web.",
-        notes: `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
-        ownerId: getCurrentUser(state).id,
+        nextActionAt: crmPayload.nextActionAt || now,
+        nextAction: crmPayload.nextAction || "Contactar lead captado desde la web.",
+        notes: crmPayload.notes || `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
+        ownerId: crmPayload.ownerId || getCurrentUser(state).id,
         recommendedPlan: row.recommended_plan || "Pro",
-        estimatedMonthlyRevenue: row.recommended_plan === "Starter" ? 29 : row.recommended_plan === "Business" ? 149 : 79,
+        estimatedMonthlyRevenue: crmPayload.estimatedMonthlyRevenue ?? (row.recommended_plan === "Starter" ? 29 : row.recommended_plan === "Business" ? 149 : 79),
         riskScore: row.risk_score || 0,
         convertedClientId: "",
       };
@@ -1467,7 +1490,7 @@ function exportBackup() {
   showToast("Copia de seguridad descargada.");
 }
 
-function handleChange(event) {
+async function handleChange(event) {
   const target = event.target;
   if (target.dataset.action === "switch-user") {
     state.currentUserId = target.value;
@@ -1476,9 +1499,19 @@ function handleChange(event) {
     return;
   }
   if (target.dataset.action === "quick-status") {
+    const previousState = state;
     state = updateLeadStatus(state, target.dataset.id, target.value);
-    render();
-    showToast("Estado actualizado.");
+    const lead = state.leads.find((item) => item.id === target.dataset.id);
+    try {
+      if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+      render();
+      showToast("Estado actualizado.");
+    } catch (error) {
+      state = previousState;
+      saveState(state);
+      render();
+      showToast(`No se pudo actualizar el estado: ${error.message}`, "error");
+    }
     return;
   }
   if (target.name === "relatedType") {
@@ -1502,15 +1535,25 @@ function handleDragOver(event) {
   }
 }
 
-function handleDrop(event) {
+async function handleDrop(event) {
   const column = event.target.closest("[data-drop-status]");
   if (!column) return;
   event.preventDefault();
   const leadId = event.dataTransfer.getData("text/plain");
   const nextStatus = mapPipelineToLeadStatus(column.dataset.dropStatus);
+  const previousState = state;
   state = updateLeadStatus(state, leadId, nextStatus);
-  render();
-  showToast(`Lead movido a ${nextStatus}.`);
+  const lead = state.leads.find((item) => item.id === leadId);
+  try {
+    if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+    render();
+    showToast(`Lead movido a ${nextStatus}.`);
+  } catch (error) {
+    state = previousState;
+    saveState(state);
+    render();
+    showToast(`No se pudo mover el lead: ${error.message}`, "error");
+  }
 }
 
 function proposalToFormData(proposal) {
@@ -1693,3 +1736,4 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return escapeHtml(value);
 }
+  
