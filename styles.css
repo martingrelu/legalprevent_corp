@@ -1664,6 +1664,283 @@ select {
   box-shadow: 0 22px 58px rgba(30, 94, 255, 0.14);
 }
 
+.partner-price-card {
+  border-color: rgba(30, 94, 255, 0.34);
+  box-shadow: 0 22px 58px rgba(30, 94, 255, 0.12);
+}
+
+.price-card .price-highlight {
+  color: var(--blue-dark);
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Partner Fundador 2026 */
+.partner-hero {
+  display: grid;
+  gap: 2.4rem;
+  align-items: center;
+  min-height: calc(100svh - 72px);
+  padding: 4.5rem 0 5rem;
+}
+
+.partner-edition {
+  display: inline-flex;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid rgba(30, 94, 255, 0.22);
+  border-radius: var(--radius);
+  background: rgba(30, 94, 255, 0.06);
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.partner-hero h1 {
+  max-width: 800px;
+  font-size: clamp(2.7rem, 8vw, 5.4rem);
+}
+
+.partner-hero-copy > p {
+  max-width: 680px;
+  margin-top: 1.3rem;
+  color: #475569;
+  font-size: clamp(1.05rem, 2vw, 1.22rem);
+  line-height: 1.7;
+}
+
+.partner-price {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin-top: 1.8rem;
+}
+
+.partner-price strong {
+  color: var(--blue-dark);
+  font-size: clamp(2.4rem, 7vw, 4.2rem);
+  line-height: 1;
+}
+
+.partner-price span,
+.partner-deadline {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.partner-hero-copy .partner-deadline {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.partner-portfolio-card {
+  padding: 1.25rem;
+  border: 1px solid rgba(30, 94, 255, 0.2);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: var(--shadow);
+}
+
+.partner-card-head {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.4rem 0.3rem 1.2rem;
+}
+
+.partner-card-head span,
+.portfolio-summary span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.partner-card-head strong {
+  color: var(--blue-dark);
+  font-size: 1.4rem;
+}
+
+.portfolio-company,
+.portfolio-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-top: 1px solid var(--line);
+  color: #475569;
+}
+
+.portfolio-company strong {
+  color: var(--blue-dark);
+  font-size: 0.86rem;
+  text-align: right;
+}
+
+.portfolio-summary {
+  display: grid;
+  margin-top: 0.7rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--blue-dark);
+  color: white;
+}
+
+.portfolio-summary span { color: #bfdbfe; }
+.portfolio-summary strong { font-size: 1.2rem; }
+
+.partner-benefits,
+.partner-founder,
+.partner-terms {
+  padding: 5rem 0;
+}
+
+.partner-benefit-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.partner-benefit-card {
+  min-height: 220px;
+  padding: 1.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 42px rgba(15, 23, 42, 0.05);
+}
+
+.partner-benefit-card > span {
+  color: var(--blue);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.partner-benefit-card h3 {
+  margin-top: 2.8rem;
+  color: var(--blue-dark);
+  font-size: 1.15rem;
+}
+
+.partner-benefit-card p {
+  margin-top: 0.65rem;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.partner-benefit-emphasis {
+  border-color: rgba(30, 94, 255, 0.32);
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.partner-adoption {
+  display: grid;
+  gap: 2rem;
+  padding: 2rem;
+  border-radius: var(--radius);
+  background: var(--blue-dark);
+  color: white;
+}
+
+.partner-adoption h2,
+.partner-founder-panel h2,
+.partner-final-cta h2 {
+  margin-top: 0.75rem;
+  font-size: clamp(2rem, 5vw, 3.7rem);
+  line-height: 1.05;
+}
+
+.partner-adoption p {
+  color: #cbd5e1;
+  line-height: 1.65;
+}
+
+.partner-adoption p + p { margin-top: 0.75rem; }
+.partner-adoption strong { display: block; margin-top: 1rem; color: white; }
+
+.partner-founder-panel {
+  padding: clamp(1.5rem, 5vw, 4rem);
+  border: 1px solid rgba(30, 94, 255, 0.2);
+  border-radius: var(--radius);
+  background: white;
+  box-shadow: var(--shadow);
+}
+
+.partner-founder-panel > p {
+  max-width: 820px;
+  margin-top: 1rem;
+  color: #475569;
+  line-height: 1.7;
+}
+
+.partner-founder-offer {
+  display: grid;
+  gap: 1.25rem;
+  align-items: center;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.partner-founder-offer span { display: grid; gap: 0.35rem; color: var(--muted); }
+.partner-founder-offer strong { color: var(--blue-dark); font-size: 1.4rem; }
+
+.partner-terms-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.partner-terms-panel summary {
+  padding: 1.3rem 1.5rem;
+  color: var(--blue-dark);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.partner-terms-copy {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0 1.5rem 1.5rem;
+  color: #475569;
+  line-height: 1.65;
+}
+
+.partner-terms-copy a { color: var(--blue); font-weight: 800; }
+
+.partner-final-cta {
+  display: grid;
+  gap: 1.5rem;
+  align-items: center;
+  margin-bottom: 5rem;
+  padding: clamp(1.5rem, 5vw, 3rem);
+  border-radius: var(--radius);
+  background: var(--blue-dark);
+  color: white;
+}
+
+.partner-final-cta p { margin-top: 1rem; color: #cbd5e1; }
+
+@media (min-width: 700px) {
+  .partner-benefit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .partner-founder-offer,
+  .partner-final-cta { grid-template-columns: 1fr auto; }
+}
+
+@media (min-width: 900px) {
+  .partner-hero { grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr); }
+  .partner-benefit-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .partner-benefit-card:last-child { grid-column: span 2; }
+  .partner-adoption { grid-template-columns: 0.9fr 1.1fr; padding: 3rem; }
+}
+
+@media (max-width: 639px) {
+  .partner-hero { padding-top: 2.8rem; }
+  .partner-hero .btn,
+  .partner-final-cta .btn { width: 100%; }
+  .portfolio-company { align-items: flex-start; }
+}
+
 .price-card span {
   color: var(--blue);
   font-size: 0.82rem;
