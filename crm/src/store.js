@@ -263,8 +263,8 @@ export function getEntityName(state, relatedType, relatedId) {
 
 export function mapLeadStatusToPipeline(status) {
   if (status === "Cliente ganado") return "Ganado";
-  if (status === "Negociacion") return "Negociacion";
-  return PIPELINE_COLUMNS.includes(status) ? status : "Contactado";
+  // Un estado desconocido queda en "Nuevo" para que se revise, no se oculta en otra fase.
+  return PIPELINE_COLUMNS.includes(status) ? status : "Nuevo";
 }
 
 export function mapPipelineToLeadStatus(column) {

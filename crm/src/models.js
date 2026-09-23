@@ -10,10 +10,13 @@ export const LEAD_STATUSES = [
   "Perdido",
 ];
 
+// Una columna por cada LEAD_STATUSES, en el mismo orden ("Ganado" = "Cliente ganado").
 export const PIPELINE_COLUMNS = [
   "Nuevo",
   "Contactado",
+  "Interesado",
   "Demo agendada",
+  "Demo realizada",
   "Propuesta enviada",
   "Negociacion",
   "Ganado",
