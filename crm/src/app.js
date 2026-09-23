@@ -1443,7 +1443,9 @@ async function syncSupabaseData() {
 
     rows.forEach((row) => {
       const existingIndex = state.leads.findIndex((lead) => lead.email === row.email);
-      const crmPayload = row.payload?.origin === "crm_manual" ? row.payload : {};
+      // Las claves del CRM conviven con el payload original del lead (merge),
+      // así que se leen sea cual sea su origen.
+      const crmPayload = row.payload || {};
       const lead = {
         id: state.leads[existingIndex]?.id || `lead-${row.id}`,
         supabaseId: row.id,

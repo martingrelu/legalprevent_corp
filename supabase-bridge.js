@@ -209,9 +209,22 @@
     });
   };
 
+  // Claves que el CRM gestiona dentro de leads.payload. El resto del payload
+  // (formulario, diagnóstico web...) pertenece al origen del lead y no se toca.
+  const buildCrmPayload = (lead) => ({
+    city: lead.city || "",
+    nextActionAt: lead.nextActionAt || "",
+    nextAction: lead.nextAction || "",
+    notes: lead.notes || "",
+    ownerId: lead.ownerId || "",
+    estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0),
+    revenueConfirmed: lead.revenueConfirmed === true
+  });
+
+  // stage y page_url describen el punto de entrada del lead: solo se escriben
+  // al crearlo, nunca al editarlo desde el CRM.
   const buildCrmLeadRecord = (lead) => ({
     source: lead.source || "CRM manual",
-    stage: lead.status || "Nuevo",
     company_name: lead.companyName || "",
     contact_name: lead.contactName || "",
     email: String(lead.email || "").trim().toLowerCase(),
@@ -221,18 +234,7 @@
     status: lead.status || "Nuevo",
     priority: lead.priority || "Media",
     risk_score: Number(lead.riskScore || 0),
-    recommended_plan: lead.recommendedPlan || "",
-    page_url: window.location.href,
-    payload: {
-      origin: "crm_manual",
-      city: lead.city || "",
-      nextActionAt: lead.nextActionAt || "",
-      nextAction: lead.nextAction || "",
-      notes: lead.notes || "",
-      ownerId: lead.ownerId || "",
-      estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || 0),
-      revenueConfirmed: lead.revenueConfirmed === true
-    }
+    recommended_plan: lead.recommendedPlan || ""
   });
 
   const saveCrmLead = async (lead) => {
@@ -242,33 +244,39 @@
     const record = buildCrmLeadRecord(lead);
     if (!record.email) throw new Error("El email del lead es obligatorio.");
 
-    let supabaseId = lead.supabaseId || "";
-    if (!supabaseId) {
-      const email = encodeURIComponent(record.email);
-      const existing = await request(`/rest/v1/leads?select=id&email=eq.${email}&limit=1`, {
-        method: "GET",
-        accessToken: session.access_token
-      });
-      supabaseId = existing?.[0]?.id || "";
-    }
+    const lookup = lead.supabaseId
+      ? `id=eq.${encodeURIComponent(lead.supabaseId)}`
+      : `email=eq.${encodeURIComponent(record.email)}`;
+    const existing = await request(`/rest/v1/leads?select=id,payload&${lookup}&limit=1`, {
+      method: "GET",
+      accessToken: session.access_token
+    });
+    const current = existing?.[0];
 
-    if (supabaseId) {
-      const rows = await request(`/rest/v1/leads?id=eq.${encodeURIComponent(supabaseId)}`, {
+    if (current) {
+      const payload = { ...(current.payload || {}), ...buildCrmPayload(lead) };
+      const rows = await request(`/rest/v1/leads?id=eq.${encodeURIComponent(current.id)}`, {
         method: "PATCH",
         accessToken: session.access_token,
         headers: { Prefer: "return=representation" },
-        body: JSON.stringify(record)
+        body: JSON.stringify({ ...record, payload })
       });
-      return rows?.[0] || { id: supabaseId, ...record };
+      return rows?.[0] || { id: current.id, ...record, payload };
     }
 
+    const created = {
+      ...record,
+      stage: "crm_manual",
+      page_url: window.location.href,
+      payload: { origin: "crm_manual", ...buildCrmPayload(lead) }
+    };
     const rows = await request("/rest/v1/leads", {
       method: "POST",
       accessToken: session.access_token,
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify(record)
+      body: JSON.stringify(created)
     });
-    return rows?.[0] || record;
+    return rows?.[0] || created;
   };
 
   const fetchBillingData = async () => {
