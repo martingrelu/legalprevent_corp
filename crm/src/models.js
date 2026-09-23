@@ -48,6 +48,23 @@ export const INTERACTION_TYPES = [
   "Cambio de estado",
 ];
 export const PROPOSAL_STATUSES = ["Borrador", "Enviada", "Aceptada", "Rechazada"];
+// [valor en leads.lead_type, etiqueta]
+export const LEAD_TYPES = [
+  ["pyme", "Pyme"],
+  ["gestoria", "Gestoría"],
+  ["despacho", "Despacho"],
+  ["grupo", "Grupo"],
+  ["autonomo", "Autónomo"],
+];
+// [valor en leads.lost_reason, etiqueta]
+export const LOST_REASONS = [
+  ["precio", "Precio"],
+  ["ya_tiene_asesor", "Ya tiene asesor"],
+  ["no_lo_necesita", "No lo necesita"],
+  ["sin_tiempo", "Sin tiempo"],
+  ["no_responde", "No responde"],
+  ["otro", "Otro"],
+];
 
 export const ROLES = {
   admin: {
@@ -103,9 +120,13 @@ export const SCHEMA = {
     source: "LeadSource",
     status: "LeadStatus",
     priority: "Priority",
+    leadType: "LeadType?",
+    zone: "string",
+    demoAt: "datetime?",
+    lostReason: "LostReason?",
     createdAt: "date",
     lastInteractionAt: "date",
-    nextActionAt: "date",
+    nextActionAt: "datetime?",
     nextAction: "string",
     notes: "string",
     ownerId: "User.id",

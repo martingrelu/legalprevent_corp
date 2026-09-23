@@ -972,6 +972,37 @@ tbody tr {
   background: #fff7f7;
 }
 
+/* Listado de leads: próxima acción vencida o vacía */
+tbody tr.is-overdue {
+  box-shadow: inset 3px 0 0 var(--red);
+}
+
+tbody tr.is-no-action {
+  background: #fffbeb;
+  box-shadow: inset 3px 0 0 var(--orange);
+}
+
+.action-pill {
+  display: inline-flex;
+  width: max-content;
+  margin-top: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.action-pill.overdue {
+  color: var(--red);
+  background: #fee4e2;
+}
+
+.action-pill.empty {
+  color: var(--orange);
+  background: #fef3c7;
+}
+
 .timeline {
   display: grid;
   gap: 0;

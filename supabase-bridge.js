@@ -213,7 +213,6 @@
   // (formulario, diagnóstico web...) pertenece al origen del lead y no se toca.
   const buildCrmPayload = (lead) => ({
     city: lead.city || "",
-    nextActionAt: lead.nextActionAt || "",
     nextAction: lead.nextAction || "",
     notes: lead.notes || "",
     ownerId: lead.ownerId || "",
@@ -234,7 +233,12 @@
     status: lead.status || "Nuevo",
     priority: lead.priority || "Media",
     risk_score: Number(lead.riskScore || 0),
-    recommended_plan: lead.recommendedPlan || ""
+    recommended_plan: lead.recommendedPlan || "",
+    lead_type: lead.leadType || null,
+    zone: lead.zone || null,
+    demo_at: lead.demoAt || null,
+    next_action_at: lead.nextActionAt || null,
+    lost_reason: lead.lostReason || null
   });
 
   const saveCrmLead = async (lead) => {
@@ -255,6 +259,9 @@
 
     if (current) {
       const payload = { ...(current.payload || {}), ...buildCrmPayload(lead) };
+      // nextActionAt vive ahora en la columna next_action_at; se retira del payload
+      // para que el respaldo antiguo no resucite una fecha borrada.
+      delete payload.nextActionAt;
       const rows = await request(`/rest/v1/leads?id=eq.${encodeURIComponent(current.id)}`, {
         method: "PATCH",
         accessToken: session.access_token,

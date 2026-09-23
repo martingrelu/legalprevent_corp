@@ -3,6 +3,8 @@ import {
   INTERACTION_TYPES,
   LEAD_SOURCES,
   LEAD_STATUSES,
+  LEAD_TYPES,
+  LOST_REASONS,
   PIPELINE_COLUMNS,
   PLANS,
   PRIORITIES,
@@ -32,6 +34,7 @@ import {
   loadState,
   mapLeadStatusToPipeline,
   mapPipelineToLeadStatus,
+  nextActionState,
   resetState,
   saveState,
   trendData,
@@ -461,8 +464,10 @@ function renderLeadFilters(filters) {
 
 function renderLeadTableRow(lead) {
   const owner = state.users.find((user) => user.id === lead.ownerId);
+  const actionState = nextActionState(lead);
+  const rowClass = { overdue: "is-overdue", empty: "is-no-action" }[actionState] || "";
   return `
-    <tr data-action="open-lead" data-id="${lead.id}">
+    <tr class="${rowClass}" data-action="open-lead" data-id="${lead.id}">
       <td>
         <strong>${escapeHtml(lead.companyName)}</strong>
         <small>${escapeHtml(lead.sector)} · ${lead.employees} empleados</small>
@@ -473,7 +478,7 @@ function renderLeadTableRow(lead) {
       <td>${badge(lead.priority, `priority-${lead.priority.toLowerCase()}`)}</td>
       <td>${escapeHtml(lead.source)}</td>
       <td>${escapeHtml(owner?.name || "Sin asignar")}</td>
-      <td>${escapeHtml(lead.nextAction)}<small>${formatDate(lead.nextActionAt)}</small></td>
+      <td>${renderNextActionCell(lead, actionState)}</td>
       <td>${leadRevenueLabel(lead)}</td>
     </tr>
   `;
@@ -533,6 +538,19 @@ function renderPipelineCard(lead) {
   `;
 }
 
+function renderNextActionCell(lead, actionState) {
+  const pill = {
+    overdue: `<span class="action-pill overdue">Vencida</span>`,
+    empty: `<span class="action-pill empty">Sin acción</span>`,
+  }[actionState] || "";
+  const when = lead.nextActionAt ? `<small>${formatDateTime(lead.nextActionAt)}</small>` : "";
+  return `${escapeHtml(lead.nextAction || "")}${when}${pill}`;
+}
+
+function optionLabel(options, value) {
+  return options.find(([optionValue]) => optionValue === value)?.[1] || "";
+}
+
 function renderLeadDetail(id) {
   const lead = state.leads.find((item) => item.id === id);
   if (!lead) return renderNotFound("Lead no encontrado");
@@ -577,7 +595,11 @@ function renderLeadDetail(id) {
             ["Responsable", owner?.name || "Sin asignar"],
             ["Creacion", formatDate(lead.createdAt)],
             ["Ultima interaccion", formatDateTime(lead.lastInteractionAt)],
-            ["Proxima accion", `${lead.nextAction} · ${formatDate(lead.nextActionAt)}`],
+            ["Tipo de lead", optionLabel(LEAD_TYPES, lead.leadType) || "Sin definir"],
+            ["Zona", lead.zone || "Sin definir"],
+            ["Demo", lead.demoAt ? formatDateTime(lead.demoAt) : "Sin demo"],
+            ["Proxima accion", lead.nextActionAt ? `${lead.nextAction} · ${formatDateTime(lead.nextActionAt)}` : "Sin acción"],
+            ...(lead.status === "Perdido" ? [["Motivo de perdida", optionLabel(LOST_REASONS, lead.lostReason) || "Sin indicar"]] : []),
             ["Plan recomendado", lead.recommendedPlan || "Pendiente"],
             ["MRR estimado", leadRevenueLabel(lead)],
             ["Riesgo detectado", `${lead.riskScore}/100`],
@@ -925,6 +947,10 @@ function renderLeadModal(lead = null) {
     source: "LinkedIn",
     status: "Nuevo",
     priority: "Media",
+    leadType: "",
+    zone: "",
+    demoAt: "",
+    lostReason: "",
     nextActionAt: "",
     nextAction: "",
     notes: "",
@@ -948,7 +974,11 @@ function renderLeadModal(lead = null) {
           ${selectField("source", LEAD_SOURCES, item.source, "Fuente")}
           ${selectField("status", LEAD_STATUSES, item.status, "Estado")}
           ${selectField("priority", PRIORITIES, item.priority, "Prioridad")}
-          ${dateField("nextActionAt", "Proxima accion fecha", item.nextActionAt)}
+          ${selectField("leadType", LEAD_TYPES, item.leadType, "Tipo de lead", "Sin definir")}
+          ${inputField("zone", "Zona (distrito o municipio)", item.zone)}
+          ${dateTimeField("demoAt", "Demo (fecha y hora)", item.demoAt)}
+          ${selectField("lostReason", LOST_REASONS, item.lostReason, "Motivo de perdida", "Sin indicar")}
+          ${dateTimeField("nextActionAt", "Proxima accion (fecha y hora)", item.nextActionAt)}
           ${inputField("nextAction", "Proxima accion", item.nextAction)}
           ${selectField("ownerId", state.users.map((user) => [user.id, user.name]), item.ownerId, "Responsable")}
           ${selectField("recommendedPlan", LEAD_PLAN_OPTIONS, item.recommendedPlan, "Plan previsto")}
@@ -1463,7 +1493,12 @@ async function syncSupabaseData() {
         priority: row.priority || "Media",
         createdAt: row.created_at || now,
         lastInteractionAt: row.created_at || now,
-        nextActionAt: crmPayload.nextActionAt || now,
+        leadType: row.lead_type || "",
+        zone: row.zone || "",
+        demoAt: row.demo_at || "",
+        lostReason: row.lost_reason || "",
+        // La columna manda; payload.nextActionAt es el dato antiguo. Sin fecha = "Sin acción".
+        nextActionAt: row.next_action_at || crmPayload.nextActionAt || "",
         nextAction: crmPayload.nextAction || "Contactar lead captado desde la web.",
         notes: crmPayload.notes || `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
         ownerId: crmPayload.ownerId || getCurrentUser(state).id,
@@ -1859,12 +1894,23 @@ function dateField(name, label, value = "") {
   return `<label>${label}<input name="${name}" type="date" value="${formatted}" /></label>`;
 }
 
+function dateTimeField(name, label, value = "") {
+  const date = value ? new Date(value) : null;
+  // datetime-local espera la hora local sin zona: YYYY-MM-DDTHH:mm
+  const formatted = date && !Number.isNaN(date.getTime())
+    ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+    : "";
+  return `<label>${label}<input name="${name}" type="datetime-local" value="${formatted}" /></label>`;
+}
+
+// allowEmpty: true muestra "Todos" (filtros); un texto se usa como etiqueta de la opción vacía.
 function selectField(name, options, value, label, allowEmpty = false) {
   const opts = options.map((option) => (Array.isArray(option) ? option : [option, option]));
+  const emptyLabel = typeof allowEmpty === "string" ? allowEmpty : "Todos";
   return `
     <label>${label}
       <select name="${name}">
-        ${allowEmpty ? `<option value="">Todos</option>` : ""}
+        ${allowEmpty ? `<option value="">${escapeHtml(emptyLabel)}</option>` : ""}
         ${opts.map(([val, text]) => `<option value="${escapeAttr(val)}" ${String(val) === String(value) ? "selected" : ""}>${escapeHtml(text)}</option>`).join("")}
       </select>
     </label>

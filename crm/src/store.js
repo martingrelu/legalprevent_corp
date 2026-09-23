@@ -2,6 +2,8 @@ import { demoData } from "./demoData.js";
 import {
   CLIENT_STATUSES,
   LEAD_STATUSES,
+  LEAD_TYPES,
+  LOST_REASONS,
   PIPELINE_COLUMNS,
   PLANS,
   PRIORITIES,
@@ -160,6 +162,23 @@ export function isOverdue(dateValue) {
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
   return due < today;
+}
+
+// Estado de la próxima acción de un lead abierto: "empty" (sin acción),
+// "overdue" (fecha y hora ya pasadas) o "scheduled". Los leads cerrados
+// (ganados o perdidos) devuelven "closed" y no se resaltan.
+export function nextActionState(lead, now = new Date()) {
+  if (["Cliente ganado", "Perdido"].includes(lead.status)) return "closed";
+  if (!lead.nextActionAt) return "empty";
+  const due = new Date(lead.nextActionAt);
+  if (Number.isNaN(due.getTime())) return "empty";
+  return due < now ? "overdue" : "scheduled";
+}
+
+function toIsoOrEmpty(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
 export function applyAutomations(state) {
@@ -358,7 +377,7 @@ export function upsertLead(state, formData, id = "") {
     source: sanitizeText(formData.get("source")),
     status: sanitizeText(formData.get("status")),
     priority: sanitizeText(formData.get("priority")),
-    nextActionAt: formData.get("nextActionAt") ? new Date(formData.get("nextActionAt")).toISOString() : "",
+    nextActionAt: toIsoOrEmpty(formData.get("nextActionAt")),
     nextAction: sanitizeText(formData.get("nextAction")),
     notes: sanitizeText(formData.get("notes")),
     ownerId: sanitizeText(formData.get("ownerId")),
@@ -367,6 +386,18 @@ export function upsertLead(state, formData, id = "") {
     revenueConfirmed: Number(formData.get("estimatedMonthlyRevenue") || 0) > 0,
     riskScore: Number(formData.get("riskScore") || 0),
   };
+
+  // Campos de embudo: si el formulario no los trae (p. ej. importación CSV)
+  // se conserva el valor actual en lugar de vaciarlo.
+  const funnelFields = {
+    leadType: (value) => sanitizeText(value),
+    zone: (value) => sanitizeText(value),
+    demoAt: (value) => toIsoOrEmpty(value),
+    lostReason: (value) => sanitizeText(value),
+  };
+  Object.entries(funnelFields).forEach(([key, parse]) => {
+    payload[key] = formData.has(key) ? parse(formData.get(key)) : current?.[key] || "";
+  });
 
   validateLead(payload);
 
@@ -400,6 +431,8 @@ export function validateLead(lead) {
   if (!LEAD_STATUSES.includes(lead.status)) throw new Error("Estado de lead no valido.");
   if (!PRIORITIES.includes(lead.priority)) throw new Error("Prioridad no valida.");
   if (lead.recommendedPlan && !PLANS.includes(lead.recommendedPlan)) throw new Error("Plan recomendado no valido.");
+  if (lead.leadType && !LEAD_TYPES.some(([value]) => value === lead.leadType)) throw new Error("Tipo de lead no valido.");
+  if (lead.lostReason && !LOST_REASONS.some(([value]) => value === lead.lostReason)) throw new Error("Motivo de perdida no valido.");
   if (lead.riskScore < 0 || lead.riskScore > 100) throw new Error("El riesgo debe estar entre 0 y 100.");
 }
 
