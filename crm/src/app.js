@@ -11,7 +11,7 @@ import {
   ROLES,
   TASK_STATUSES,
   SCHEMA,
-} from "./models.js";
+} from "./models.js?v=20260923-3";
 import {
   addInteraction,
   applyAutomations,
@@ -46,8 +46,8 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js";
-import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js";
+} from "./store.js?v=20260923-3";
+import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20260923-3";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();

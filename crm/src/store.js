@@ -1,4 +1,4 @@
-import { demoData } from "./demoData.js";
+import { demoData } from "./demoData.js?v=20260923-3";
 import {
   CLIENT_STATUSES,
   LEAD_SOURCES,
@@ -11,7 +11,7 @@ import {
   PROPOSAL_STATUSES,
   ROLES,
   TASK_STATUSES,
-} from "./models.js";
+} from "./models.js?v=20260923-3";
 
 const STORAGE_KEY = "legalprevent-crm-v1";
 
