@@ -1,6 +1,7 @@
 import { demoData } from "./demoData.js";
 import {
   CLIENT_STATUSES,
+  LEAD_SOURCES,
   LEAD_STATUSES,
   LEAD_TYPES,
   LOST_REASONS,
@@ -363,6 +364,24 @@ export function updateLeadStatus(state, leadId, nextStatus) {
   return applyAutomations(next);
 }
 
+// Origen del lead en Supabase: "crm_manual" si se creó en el CRM, "web" si llegó
+// desde la web (landing, diagnóstico...). Los leads solo locales no tienen origen.
+export function leadOriginFromRow(row) {
+  return row?.payload?.origin === "crm_manual" || row?.stage === "crm_manual" ? "crm_manual" : "web";
+}
+
+// La fuente de un lead web es su canal de entrada: no se edita desde el CRM.
+export function isSourceLocked(lead) {
+  return lead?.leadOrigin === "web";
+}
+
+// Opciones de fuente: las del catálogo más cualquier valor real presente en los leads.
+export function leadSourceOptions(state, current = "") {
+  const extra = state.leads.map((lead) => lead.source).concat(current)
+    .filter((value) => value && !LEAD_SOURCES.includes(value));
+  return [...LEAD_SOURCES, ...[...new Set(extra)].sort((a, b) => a.localeCompare(b, "es"))];
+}
+
 export function upsertLead(state, formData, id = "") {
   const next = clone(state);
   const current = id ? next.leads.find((lead) => lead.id === id) : null;
@@ -374,7 +393,7 @@ export function upsertLead(state, formData, id = "") {
     sector: sanitizeText(formData.get("sector")),
     employees: Number(formData.get("employees") || 0),
     city: sanitizeText(formData.get("city")),
-    source: sanitizeText(formData.get("source")),
+    source: isSourceLocked(current) || !formData.has("source") ? current?.source || "" : sanitizeText(formData.get("source")),
     status: sanitizeText(formData.get("status")),
     priority: sanitizeText(formData.get("priority")),
     nextActionAt: toIsoOrEmpty(formData.get("nextActionAt")),

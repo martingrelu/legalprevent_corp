@@ -1,7 +1,6 @@
 import {
   CLIENT_STATUSES,
   INTERACTION_TYPES,
-  LEAD_SOURCES,
   LEAD_STATUSES,
   LEAD_TYPES,
   LOST_REASONS,
@@ -30,6 +29,9 @@ import {
   getEntityName,
   importBackup,
   isOverdue,
+  isSourceLocked,
+  leadOriginFromRow,
+  leadSourceOptions,
   leadScore,
   loadState,
   mapLeadStatusToPipeline,
@@ -453,7 +455,7 @@ function renderLeadFilters(filters) {
       <input name="query" value="${escapeAttr(filters.query || "")}" placeholder="Buscar empresa, contacto o email" />
       ${selectField("origin", [["real", "Reales"], ["demo", "Demo"]], filters.origin, "Tipo", true)}
       ${selectField("status", LEAD_STATUSES, filters.status, "Estado", true)}
-      ${selectField("source", LEAD_SOURCES, filters.source, "Fuente", true)}
+      ${selectField("source", leadSourceOptions(state), filters.source, "Fuente", true)}
       ${selectField("priority", PRIORITIES, filters.priority, "Prioridad", true)}
       ${selectField("ownerId", state.users.map((user) => [user.id, user.name]), filters.ownerId, "Responsable", true)}
       ${selectField("plan", PLANS, filters.plan, "Plan", true)}
@@ -971,7 +973,7 @@ function renderLeadModal(lead = null) {
           ${inputField("sector", "Sector", item.sector)}
           ${inputField("employees", "Empleados", item.employees, "number")}
           ${inputField("city", "Ciudad/provincia", item.city)}
-          ${selectField("source", LEAD_SOURCES, item.source, "Fuente")}
+          ${isSourceLocked(item) ? readOnlyField("Fuente (canal de entrada)", item.source) : selectField("source", leadSourceOptions(state, item.source), item.source, "Fuente")}
           ${selectField("status", LEAD_STATUSES, item.status, "Estado")}
           ${selectField("priority", PRIORITIES, item.priority, "Prioridad")}
           ${selectField("leadType", LEAD_TYPES, item.leadType, "Tipo de lead", "Sin definir")}
@@ -1366,7 +1368,8 @@ async function handleSubmit(event) {
         Object.assign(savedLead, {
           supabaseId: remoteLead.id,
           dataOrigin: "supabase",
-          externalSource: "supabase"
+          externalSource: "supabase",
+          leadOrigin: leadOriginFromRow(remoteLead)
         });
         saveState(nextState);
         state = nextState;
@@ -1489,6 +1492,7 @@ async function syncSupabaseData() {
         employees: row.employees || "",
         city: crmPayload.city || "",
         source: row.source || "Web",
+        leadOrigin: leadOriginFromRow(row),
         status: row.status || "Nuevo",
         priority: row.priority || "Media",
         createdAt: row.created_at || now,
@@ -1892,6 +1896,11 @@ function inputField(name, label, value = "", type = "text") {
 function dateField(name, label, value = "") {
   const formatted = value ? new Date(value).toISOString().slice(0, 10) : "";
   return `<label>${label}<input name="${name}" type="date" value="${formatted}" /></label>`;
+}
+
+// Campo informativo: sin name, así que no viaja en el FormData.
+function readOnlyField(label, value = "") {
+  return `<label>${label}<input type="text" value="${escapeAttr(value ?? "")}" readonly disabled /></label>`;
 }
 
 function dateTimeField(name, label, value = "") {

@@ -251,13 +251,16 @@
     const lookup = lead.supabaseId
       ? `id=eq.${encodeURIComponent(lead.supabaseId)}`
       : `email=eq.${encodeURIComponent(record.email)}`;
-    const existing = await request(`/rest/v1/leads?select=id,payload&${lookup}&limit=1`, {
+    const existing = await request(`/rest/v1/leads?select=id,payload,stage&${lookup}&limit=1`, {
       method: "GET",
       accessToken: session.access_token
     });
     const current = existing?.[0];
 
     if (current) {
+      // La fuente de un lead web es su canal de entrada: no se modifica desde el CRM.
+      const isManual = current.payload?.origin === "crm_manual" || current.stage === "crm_manual";
+      if (!isManual) delete record.source;
       const payload = { ...(current.payload || {}), ...buildCrmPayload(lead) };
       // nextActionAt vive ahora en la columna next_action_at; se retira del payload
       // para que el respaldo antiguo no resucite una fecha borrada.
