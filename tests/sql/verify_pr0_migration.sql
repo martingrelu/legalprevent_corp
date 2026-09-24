@@ -180,3 +180,7 @@ end;
 $$;
 
 rollback;
+
+-- Resultado visible también en clientes que no muestran los NOTICE (SQL Editor
+-- de Supabase): solo se llega aquí si los 10 bloques han pasado.
+select 'OK: verificación PR0 superada' as resultado;
