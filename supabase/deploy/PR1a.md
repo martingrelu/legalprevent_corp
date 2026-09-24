@@ -97,3 +97,4 @@ select split_part(bucket, ':', 1) as ambito, sum(greatest(hits - 1, 0)) as inten
 | Paso 2: `verify_pr1a` con `FALLO`, el CRM no carga o la web no guarda leads | `supabase/rollback/20260925_public_limits_consent_down.sql` (vuelve a las funciones y permisos de PR0; conserva consentimientos y columnas). `20260925_crm_admin_policies.sql` no necesita rollback. |
 | Demasiados rechazos legítimos por el límite | Sube los umbrales en `private.settings` (ver arriba); no requiere despliegue. |
 | Tras configurar la IP, rechazos inesperados | `update private.settings set value = '"none"' where key = 'client_ip_source';` |
+| Restaurar la copia CSV de `leads` hecha antes de PR1a | `\copy public.leads (<columnas del CSV>) from 'leads.csv' with (format csv, header true, null 'null')` y después vuelve a marcar la revisión jurídica: `update public.leads set privacy_review_required = true where privacy_accepted_at is null;` (probado el 2026-09-25 con la copia real: 66/66). |
