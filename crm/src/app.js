@@ -11,7 +11,7 @@ import {
   ROLES,
   TASK_STATUSES,
   SCHEMA,
-} from "./models.js?v=20260923-3";
+} from "./models.js?v=20260925-1";
 import {
   addInteraction,
   applyAutomations,
@@ -30,6 +30,7 @@ import {
   importBackup,
   isOverdue,
   isSourceLocked,
+  leadFromSupabaseRow,
   leadOriginFromRow,
   leadSourceOptions,
   leadScore,
@@ -46,8 +47,8 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20260923-3";
-import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20260923-3";
+} from "./store.js?v=20260925-1";
+import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20260925-1";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();
@@ -298,6 +299,7 @@ function renderDashboard() {
         ${metricCard("Leads nuevos", metrics.newLeads, "Ultimos 7 dias")}
         ${metricCard("Demos agendadas", metrics.demosScheduled, "Pendientes")}
         ${metricCard("Demos realizadas", metrics.demosDone, "Sin contar cerradas")}
+        ${metricCard("Demos solicitadas (web)", metrics.demosRequested, "Tras el diagnóstico, sin atender")}
         ${metricCard("Clientes activos", metrics.activeClients, "En servicio")}
         ${metricCard("Clientes perdidos", metrics.lostLeads, "Leads marcados perdido")}
         ${metricCard("Facturacion mensual", formatCurrency(metrics.monthlyRevenue), "MRR estimado")}
@@ -459,9 +461,25 @@ function renderLeadFilters(filters) {
       ${selectField("priority", PRIORITIES, filters.priority, "Prioridad", true)}
       ${selectField("ownerId", state.users.map((user) => [user.id, user.name]), filters.ownerId, "Responsable", true)}
       ${selectField("plan", PLANS, filters.plan, "Plan", true)}
+      ${selectField("demoRequested", [["1", "Pedida desde la web"]], filters.demoRequested, "Demo solicitada", true)}
+      ${selectField("privacyReview", [["1", "Pendiente de revisión"]], filters.privacyReview, "Privacidad", true)}
       <button class="secondary-button" type="submit">Filtrar</button>
     </form>
   `;
+}
+
+// Marcas informativas de un lead web: demo pedida tras el diagnóstico y
+// consentimiento pendiente de revisión jurídica.
+function renderLeadFlags(lead) {
+  return [
+    lead.demoRequestedAt ? `<span class="flag-pill demo-request" title="${escapeAttr(formatDateTime(lead.demoRequestedAt))}">Demo solicitada</span>` : "",
+    lead.privacyReviewRequired ? `<span class="flag-pill privacy-review">Revisar privacidad</span>` : "",
+  ].join("");
+}
+
+// Texto plano: keyValues() ya escapa los valores.
+function consentLabel(at, version) {
+  return at ? `Sí · ${formatDateTime(at)}${version ? ` · versión ${version}` : ""}` : "No";
 }
 
 function renderLeadTableRow(lead) {
@@ -474,6 +492,7 @@ function renderLeadTableRow(lead) {
         <strong>${escapeHtml(lead.companyName)}</strong>
         <small>${escapeHtml(lead.sector)} · ${lead.employees} empleados</small>
         ${isRealLead(lead) ? `<span class="origin-pill real">Real</span>` : `<span class="origin-pill demo">Demo</span>`}
+        ${renderLeadFlags(lead)}
       </td>
       <td>${escapeHtml(lead.contactName)}<small>${escapeHtml(lead.email)}</small></td>
       <td>${badge(lead.status)}</td>
@@ -574,6 +593,7 @@ function renderLeadDetail(id) {
             ${badge(lead.status)}
             ${badge(lead.priority, `priority-${lead.priority.toLowerCase()}`)}
             ${badge(`${leadScore(lead)} score`, "score-badge")}
+            ${renderLeadFlags(lead)}
           </div>
         </div>
         <div class="button-row">
@@ -600,6 +620,11 @@ function renderLeadDetail(id) {
             ["Tipo de lead", optionLabel(LEAD_TYPES, lead.leadType) || "Sin definir"],
             ["Zona", lead.zone || "Sin definir"],
             ["Demo", lead.demoAt ? formatDateTime(lead.demoAt) : "Sin demo"],
+            ...(lead.demoRequestedAt ? [["Demo solicitada desde la web", formatDateTime(lead.demoRequestedAt)]] : []),
+            ...(isRealLead(lead) && lead.consentTracked ? [
+              ["Privacidad aceptada", lead.privacyReviewRequired ? "Sin prueba de fecha/versión · pendiente de revisión jurídica" : consentLabel(lead.privacyAcceptedAt, lead.privacyPolicyVersion)],
+              ["Comunicaciones comerciales", lead.commercialConsent ? consentLabel(lead.commercialConsentAt, lead.commercialConsentVersion) : "No"],
+            ] : []),
             ["Proxima accion", lead.nextActionAt ? `${lead.nextAction} · ${formatDateTime(lead.nextActionAt)}` : "Sin acción"],
             ...(lead.status === "Perdido" ? [["Motivo de perdida", optionLabel(LOST_REASONS, lead.lostReason) || "Sin indicar"]] : []),
             ["Plan recomendado", lead.recommendedPlan || "Pendiente"],
@@ -1476,42 +1501,11 @@ async function syncSupabaseData() {
 
     rows.forEach((row) => {
       const existingIndex = state.leads.findIndex((lead) => lead.email === row.email);
-      // Las claves del CRM conviven con el payload original del lead (merge),
-      // así que se leen sea cual sea su origen.
-      const crmPayload = row.payload || {};
-      const lead = {
-        id: state.leads[existingIndex]?.id || `lead-${row.id}`,
-        supabaseId: row.id,
-        dataOrigin: "supabase",
-        externalSource: "supabase",
-        companyName: row.company_name || `Lead web - ${row.email}`,
-        contactName: row.contact_name || row.company_name || "Pendiente de completar",
-        email: row.email || "",
-        phone: row.phone || "",
-        sector: row.sector || "Pendiente",
-        employees: row.employees || "",
-        city: crmPayload.city || "",
-        source: row.source || "Web",
-        leadOrigin: leadOriginFromRow(row),
-        status: row.status || "Nuevo",
-        priority: row.priority || "Media",
-        createdAt: row.created_at || now,
-        lastInteractionAt: row.created_at || now,
-        leadType: row.lead_type || "",
-        zone: row.zone || "",
-        demoAt: row.demo_at || "",
-        lostReason: row.lost_reason || "",
-        // La columna manda; payload.nextActionAt es el dato antiguo. Sin fecha = "Sin acción".
-        nextActionAt: row.next_action_at || crmPayload.nextActionAt || "",
-        nextAction: crmPayload.nextAction || "Contactar lead captado desde la web.",
-        notes: crmPayload.notes || `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
-        ownerId: crmPayload.ownerId || getCurrentUser(state).id,
-        recommendedPlan: row.recommended_plan || "",
-        estimatedMonthlyRevenue: Number(crmPayload.estimatedMonthlyRevenue || 0),
-        revenueConfirmed: Boolean(crmPayload.revenueConfirmed),
-        riskScore: row.risk_score || 0,
-        convertedClientId: "",
-      };
+      const lead = leadFromSupabaseRow(row, {
+        existingId: state.leads[existingIndex]?.id,
+        defaultOwnerId: getCurrentUser(state).id,
+        now,
+      });
 
       if (existingIndex >= 0) {
         state.leads[existingIndex] = { ...state.leads[existingIndex], ...lead, dataOrigin: "supabase", externalSource: "supabase", supabaseId: row.id };

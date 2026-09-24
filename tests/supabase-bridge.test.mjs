@@ -24,12 +24,15 @@ function createStorage(initial = {}) {
   };
 }
 
-function loadBridge({ submitLeadStatus = 200, submitDiagnosticStatus = 200, emailStatus = 200, demoMarked = true, storage } = {}) {
+function loadBridge({ submitLeadStatus = 200, submitDiagnosticStatus = 200, emailStatus = 200, demoMarked = true, rateLimited = false, storage } = {}) {
   const calls = [];
   const localStorage = storage || createStorage();
   const sessionStorage = createStorage();
   const fetch = async (url, init = {}) => {
     calls.push({ url: String(url), body: init.body ? JSON.parse(init.body) : null });
+    if (rateLimited && /\/rpc\/submit_(lead|diagnostic)$/.test(String(url))) {
+      return new Response(JSON.stringify({ error: "rate_limited" }), { status: 200 });
+    }
     if (String(url).endsWith("/rpc/submit_lead")) {
       return submitLeadStatus === 200
         ? new Response(JSON.stringify({ id: LEAD_ID }), { status: 200 })
@@ -204,4 +207,30 @@ test("sin configuración de Supabase no se guarda nada en el navegador", async (
   const result = await context.window.LegalPreventSupabase.createLead(demoInput);
   assert.equal(result.ok, false);
   assert.deepEqual(storage.writes, []);
+});
+
+test("envía la versión de la política de privacidad y, solo si hay consentimiento, la de comunicaciones", async () => {
+  const sin = loadBridge();
+  await sin.api.createLead(demoInput);
+  const record = submittedLead(sin.calls);
+  assert.equal(record.privacy_policy_version, "2026-06-04");
+  assert.equal("commercial_consent_version" in record, false);
+
+  const con = loadBridge();
+  await con.api.createLead({ ...demoInput, form: { ...demoInput.form, commercial: "on" } });
+  assert.equal(submittedLead(con.calls).commercial_consent_version, "2026-06-04");
+
+  const diag = loadBridge();
+  await diag.api.createDiagnostic({ payload: { company: { email: "ana@empresa.es" } }, privacyAccepted: true });
+  assert.equal(diag.calls.find((call) => call.url.endsWith("/rpc/submit_diagnostic")).body.p_payload.privacy_policy_version, "2026-06-04");
+});
+
+test("límite superado: informa rate_limited, no pide aviso y no guarda nada en el navegador", async () => {
+  const { api, calls, localStorage } = loadBridge({ rateLimited: true });
+  const lead = await api.createLead(demoInput);
+  const diagnostic = await api.createDiagnostic({ payload: { company: { email: "ana@empresa.es" } }, privacyAccepted: true });
+  assert.deepEqual([lead.ok, lead.reason], [false, "rate_limited"]);
+  assert.deepEqual([diagnostic.ok, diagnostic.reason], [false, "rate_limited"]);
+  assert.equal(calls.some((call) => call.url.endsWith("/smooth-action")), false);
+  assert.deepEqual(localStorage.writes, []);
 });

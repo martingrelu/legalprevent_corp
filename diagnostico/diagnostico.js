@@ -485,10 +485,13 @@ if (diagnosticApp) {
   const leadFailureMessage =
     "No hemos podido registrar tus datos para que te contactemos. Puedes descargar el informe y escribirnos a legal@legalprevent.com.";
 
+  const rateLimitedMessage =
+    "Hemos recibido muchas solicitudes en poco tiempo, así que no hemos podido registrar tus datos. Puedes descargar el informe y escribirnos a legal@legalprevent.com.";
+
   const showLeadFailure = (result) => {
     if (result?.ok) return;
     const feedback = document.querySelector("[data-diagnostic-feedback]");
-    if (feedback) feedback.textContent = leadFailureMessage;
+    if (feedback) feedback.textContent = result?.reason === "rate_limited" ? rateLimitedMessage : leadFailureMessage;
   };
 
   const pdfText = (value) => {

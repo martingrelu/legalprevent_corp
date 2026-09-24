@@ -1,4 +1,4 @@
-import { demoData } from "./demoData.js?v=20260923-3";
+import { demoData } from "./demoData.js?v=20260925-1";
 import {
   CLIENT_STATUSES,
   LEAD_SOURCES,
@@ -11,7 +11,7 @@ import {
   PROPOSAL_STATUSES,
   ROLES,
   TASK_STATUSES,
-} from "./models.js?v=20260923-3";
+} from "./models.js?v=20260925-1";
 
 const STORAGE_KEY = "legalprevent-crm-v1";
 
@@ -310,6 +310,11 @@ export function dashboardMetrics(state) {
   const lostLeads = state.leads.filter((lead) => lead.status === "Perdido").length;
   const demosScheduled = state.leads.filter((lead) => lead.status === "Demo agendada").length;
   const demosDone = state.leads.filter((lead) => lead.status === "Demo realizada").length;
+  // Solicitudes de demostración hechas desde la web tras el diagnóstico que
+  // aún no se han cerrado ni atendido con una demo.
+  const demosRequested = state.leads.filter(
+    (lead) => lead.demoRequestedAt && !["Demo agendada", "Demo realizada", "Cliente ganado", "Perdido"].includes(lead.status)
+  ).length;
   const newLeads = state.leads.filter((lead) => daysBetween(lead.createdAt) <= 7).length;
   const activeClients = state.clients.filter((client) => client.status === "Activo").length;
   const monthlyRevenue = state.clients
@@ -322,6 +327,7 @@ export function dashboardMetrics(state) {
     newLeads,
     demosScheduled,
     demosDone,
+    demosRequested,
     activeClients,
     lostLeads,
     monthlyRevenue,
@@ -366,6 +372,57 @@ export function updateLeadStatus(state, leadId, nextStatus) {
 
 // Origen del lead en Supabase: "crm_manual" si se creó en el CRM, "web" si llegó
 // desde la web (landing, diagnóstico...). Los leads solo locales no tienen origen.
+// Convierte una fila de public.leads (Supabase) en un lead del CRM.
+export function leadFromSupabaseRow(row, { existingId = "", defaultOwnerId = "", now = new Date().toISOString() } = {}) {
+  // Las claves del CRM conviven con el payload original del lead (merge),
+  // así que se leen sea cual sea su origen.
+  const crmPayload = row.payload || {};
+  return {
+    id: existingId || `lead-${row.id}`,
+    supabaseId: row.id,
+    dataOrigin: "supabase",
+    externalSource: "supabase",
+    companyName: row.company_name || `Lead web - ${row.email}`,
+    contactName: row.contact_name || row.company_name || "Pendiente de completar",
+    email: row.email || "",
+    phone: row.phone || "",
+    sector: row.sector || "Pendiente",
+    employees: row.employees || "",
+    city: crmPayload.city || "",
+    source: row.source || "Web",
+    leadOrigin: leadOriginFromRow(row),
+    status: row.status || "Nuevo",
+    priority: row.priority || "Media",
+    createdAt: row.created_at || now,
+    lastInteractionAt: row.created_at || now,
+    leadType: row.lead_type || "",
+    zone: row.zone || "",
+    demoAt: row.demo_at || "",
+    // Demostración pedida por el visitante tras el diagnóstico (mismo lead).
+    demoRequestedAt: row.demo_requested_at || "",
+    lostReason: row.lost_reason || "",
+    // La columna manda; payload.nextActionAt es el dato antiguo. Sin fecha = "Sin acción".
+    nextActionAt: row.next_action_at || crmPayload.nextActionAt || "",
+    nextAction: crmPayload.nextAction || "Contactar lead captado desde la web.",
+    notes: crmPayload.notes || `Lead sincronizado desde Supabase. Origen: ${row.source || "web"}.`,
+    ownerId: crmPayload.ownerId || defaultOwnerId,
+    recommendedPlan: row.recommended_plan || "",
+    estimatedMonthlyRevenue: Number(crmPayload.estimatedMonthlyRevenue || 0),
+    revenueConfirmed: Boolean(crmPayload.revenueConfirmed),
+    riskScore: row.risk_score || 0,
+    convertedClientId: "",
+    // Consentimiento (solo lectura en el CRM: lo registra el servidor). Si la
+    // base aún no tiene estas columnas, no se muestran en la ficha.
+    consentTracked: "privacy_accepted_at" in row,
+    privacyAcceptedAt: row.privacy_accepted_at || "",
+    privacyPolicyVersion: row.privacy_policy_version || "",
+    commercialConsent: row.commercial_consent === true,
+    commercialConsentAt: row.commercial_consent_at || "",
+    commercialConsentVersion: row.commercial_consent_version || "",
+    privacyReviewRequired: row.privacy_review_required === true,
+  };
+}
+
 export function leadOriginFromRow(row) {
   return row?.payload?.origin === "crm_manual" || row?.stage === "crm_manual" ? "crm_manual" : "web";
 }
@@ -677,7 +734,9 @@ export function filteredLeads(state, filters) {
     const matchesPriority = !filters.priority || lead.priority === filters.priority;
     const matchesOwner = !filters.ownerId || lead.ownerId === filters.ownerId;
     const matchesPlan = !filters.plan || lead.recommendedPlan === filters.plan;
-    return matchesQuery && matchesOrigin && matchesStatus && matchesSector && matchesSource && matchesPriority && matchesOwner && matchesPlan;
+    const matchesDemoRequest = !filters.demoRequested || Boolean(lead.demoRequestedAt);
+    const matchesPrivacyReview = !filters.privacyReview || lead.privacyReviewRequired === true;
+    return matchesQuery && matchesOrigin && matchesStatus && matchesSector && matchesSource && matchesPriority && matchesOwner && matchesPlan && matchesDemoRequest && matchesPrivacyReview;
   });
 }
 

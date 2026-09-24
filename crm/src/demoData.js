@@ -1,4 +1,4 @@
-import { DEFAULT_USERS } from "./models.js?v=20260923-3";
+import { DEFAULT_USERS } from "./models.js?v=20260925-1";
 
 const now = new Date("2026-05-23T12:00:00+02:00");
 

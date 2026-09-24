@@ -4,8 +4,13 @@ Reproduce en local, sin tocar producción, el entorno de captación de leads:
 
 - **Postgres 17** (como producción) con los roles y privilegios por defecto de Supabase
   (`anon`, `authenticated`, `service_role`, `authenticator`).
-- **Dos bases**: `lab_old` (esquema publicado, igual que producción antes de
-  PR0) y `lab` (esquema publicado + migración de PR0).
+- **Dos bases**: `lab_old` (esquema publicado en `origin/main` más los cambios
+  que ya existen en producción y aún no estaban en el repositorio —`PROD_DRIFT`
+  en `run.sh`—: reproduce producción) y `lab` (`lab_old` + las migraciones de la
+  rama). Comparado con el inventario real (`supabase/deploy/pr1-inventory.sql`):
+  0 diferencias en tablas, permisos, políticas y funciones.
+- **`auth.jwt()` emulado** (`sql/02_auth.sql`): las políticas "CRM admin" y
+  `is_crm_admin()` se comportan como en producción (`app_metadata.crm_role`).
 - **PostgREST** para cada base, como la API REST de Supabase.
 - **Gateway** con las mismas URLs que Supabase (`/rest/v1`, `/functions/v1/smooth-action`)
   que ejecuta la función nueva (del repo) o la publicada (del git ref), y un
@@ -51,11 +56,13 @@ Elimina contenedores y red.
 
 | Fichero | Contenido |
 |---|---|
-| `sql.lab.mjs` | Migración reaplicable, `tests/sql/verify_pr0_migration.sql` (10 bloques), 4 mutaciones de seguridad que el verificador debe detectar y permisos efectivos de `anon`. |
-| `concurrency.lab.mjs` | Reclamaciones simultáneas, tope horario con peticiones concurrentes (y prueba de que sin el advisory lock se supera), sesiones `psql` independientes, idempotencia ante fallos de Resend, plazos, CORS y destinatarios arbitrarios. |
+| `sql.lab.mjs` | Verificadores de PR0 (sobre la réplica de producción) y PR1a, migraciones reaplicables, 6 mutaciones de seguridad que el verificador debe detectar y matriz de permisos de `anon`/`authenticated`. |
+| `limits.lab.mjs` | Límites de altas públicas con 100 peticiones simultáneas: por email, global, cierre de emergencia, por IP (incluida la cabecera falseada), sin IP configurada y sin datos parciales al rechazar. |
+| `concurrency.lab.mjs` | Avisos internos: reclamaciones simultáneas, tope horario (y prueba de que sin advisory lock se supera), sesiones `psql` independientes, idempotencia ante fallos de Resend, plazos, CORS y destinatarios arbitrarios. |
 | `flows.lab.mjs` | Web nueva: demo con/sin comunicaciones comerciales, diagnóstico + demo sobre el mismo lead, privacidad obligatoria, nada en el navegador. |
-| `compat.lab.mjs` | Web y función publicadas: línea base (vulnerabilidad reproducida), despliegue paso a paso en el orden recomendado, compatibilidad temporal del diagnóstico y rollback con reaplicación. |
-| `crm.lab.mjs` | CRM nuevo y publicado: sincronización, edición de un lead web sin alterar los campos de PR0 y alta manual. |
+| `compat.lab.mjs` | Web publicada contra la base de la rama, límite superado con la web antigua y la nueva, web nueva sobre la base sin migrar (orden de despliegue) y rollback con reaplicación. |
+| `crm.lab.mjs` | CRM nuevo y publicado con usuario administrador: sincronización, edición sin alterar consentimiento ni avisos, alta manual; usuario sin rol: sin acceso. |
+| `stripe.lab.mjs` | Webhook (service role) sigue escribiendo; `anon` sin acceso; el CRM administrador solo lee. |
 
 Con `--serve` también se pueden ensayar las comprobaciones de despliegue
 (`supabase/deploy/pr0-checks.sh`) en cada estado, cambiando el escenario con

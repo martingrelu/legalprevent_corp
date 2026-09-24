@@ -69,16 +69,30 @@ cp "$WORK/published/supabase/functions/send-lead-email/index.ts" "$WORK/publishe
 export LAB_PUBLISHED_FUNCTION="$WORK/published-function.ts"
 export LAB_NEW_FUNCTION="$ROOT/supabase/functions/send-lead-email/index.ts"
 
-echo "== Bases de datos: lab_old (esquema publicado) y lab (publicado + PR0)"
+# Cambios que ya existen en producción pero se incorporan al repositorio
+# después (inventario del 2026-09-24): se aplican también a lab_old para que
+# reproduzca producción fielmente.
+PROD_DRIFT=("20260925_crm_admin_policies.sql")
+
+echo "== Bases de datos: lab_old (producción actual) y lab (producción + rama)"
 psql_run postgres < "$LAB/sql/00_roles.sql"
 for db in lab_old lab; do
   docker exec "$PG" psql -U postgres -qc "create database $db" >/dev/null
   psql_run "$db" < "$LAB/sql/01_db_privileges.sql"
+  psql_run "$db" < "$LAB/sql/02_auth.sql"
   psql_run "$db" < "$WORK/published/supabase/schema.sql"
   psql_run "$db" < "$WORK/published/supabase/stripe-schema.sql"
   for m in "$WORK/published/supabase/migrations/"*.sql; do psql_run "$db" < "$m"; done
+  for m in "${PROD_DRIFT[@]}"; do psql_run "$db" < "$ROOT/supabase/migrations/$m"; done
 done
-psql_run lab < "$ROOT/supabase/migrations/20260924_lead_notification_claim.sql"
+# lab: además, las migraciones de la rama que aún no están publicadas.
+for m in "$ROOT/supabase/migrations/"*.sql; do
+  name="$(basename "$m")"
+  [[ -e "$WORK/published/supabase/migrations/$name" ]] && continue
+  [[ " ${PROD_DRIFT[*]} " == *" $name "* ]] && continue
+  echo "   + $name"
+  psql_run lab < "$m"
+done
 
 echo "== PostgREST"
 for pair in "lp-lab-rest:lab:$LAB_REST_PORT" "lp-lab-rest-old:lab_old:$LAB_REST_OLD_PORT"; do
