@@ -12,6 +12,9 @@
 5. Para comprobarla en una base de pruebas:
    `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/sql/verify_pr0_migration.sql`
    (se ejecuta en una transacción con ROLLBACK).
+6. Despliegue en producción de PR0: sigue `supabase/deploy/PR0.md` (orden
+   función → migración → web, comprobaciones y recuperación ante errores).
+   Laboratorio local reproducible: `tests/lab/run.sh` (ver `tests/lab/README.md`).
 
 ## 2. Crear usuario para el CRM
 

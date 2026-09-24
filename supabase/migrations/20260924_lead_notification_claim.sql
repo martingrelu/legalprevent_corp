@@ -10,6 +10,9 @@
 --    puedan superarlo. Solo la service role (Edge Function) puede usarla.
 --
 -- Idempotente: se puede ejecutar varias veces sin efectos adicionales.
+-- Todo o nada: se ejecuta en una única transacción (si algo falla, no se
+-- aplica ningún cambio). Rollback: supabase/rollback/20260924_lead_notification_claim_down.sql
+begin;
 
 -- ---------------------------------------------------------------------------
 -- Columnas
@@ -324,3 +327,5 @@ grant execute on function public.submit_diagnostic(jsonb) to anon, authenticated
 grant execute on function public.request_lead_demo(uuid) to anon, authenticated;
 grant execute on function public.claim_lead_notification(uuid, text, integer) to service_role;
 grant execute on function public.release_lead_notification(uuid, text, timestamptz) to service_role;
+
+commit;
