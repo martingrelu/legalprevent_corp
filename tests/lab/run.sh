@@ -16,7 +16,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LAB="$ROOT/tests/lab"
 PUBLISHED_REF="${PUBLISHED_REF:-origin/main}"
-PG_IMAGE="postgres:15-alpine"
+# Misma versión mayor que producción (PostgreSQL 17.6, captura previa del 2026-09-24).
+PG_IMAGE="${LAB_PG_IMAGE:-postgres:17-alpine}"
 REST_IMAGE="postgrest/postgrest:v12.2.3"
 NET="lp-lab"
 PG="lp-lab-pg"

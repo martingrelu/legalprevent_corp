@@ -9,6 +9,9 @@ Proyecto Supabase: `wtpfrlsbfishvworjdtr` · Web: <https://legalprevent.com> (Gi
 
 Todas las comprobaciones de `pr0-checks.sh` son de solo lectura: no crean
 registros ni envían emails (medido en el laboratorio en todos los estados).
+Las de permisos exigen el código de Postgres `42501`, no solo un HTTP 401:
+Supabase tiene abierta una incidencia de rechazos JWT intermitentes (401) que
+daría falsos positivos. Revisa <https://status.supabase.com> antes de empezar.
 
 ---
 
@@ -26,8 +29,12 @@ registros ni envían emails (medido en el laboratorio en todos los estados).
     (si alguno es `false`, `verify_pr0_migration.sql` no podrá cambiar de rol:
     avisa antes de seguir)
   - anota `filas en leads` y `filas en diagnostics`.
-- [ ] **Copia de datos**: Table Editor → `leads` y `diagnostics` → Export CSV
-      (o confirma que hay backup diario activo en Database → Backups).
+- [ ] **Copia de datos**: SQL Editor → `select * from public.leads order by created_at, id;`
+      → Run → Export → Download CSV (lo mismo con `diagnostics` si tiene filas).
+      Guárdala fuera del repositorio con permisos solo para tu usuario y
+      **prueba la restauración** en local (ver "Restaurar la copia CSV").
+      Las copias diarias de Database → Backups restauran la base entera a esa
+      hora: sirven para un desastre, no para recuperar dos tablas.
 
 ### Configuración de la función (Dashboard → Edge Functions → Secrets)
 
@@ -106,6 +113,21 @@ vulnerabilidad. Las opciones seguras son:
 | Paso 2: la migración da error | No se ha aplicado nada (transacción). Guarda el mensaje de error; la función nueva sigue segura con los avisos en pausa. |
 | Paso 2: `verify_pr0_migration.sql` muestra `FALLO` o la web deja de guardar leads | Ejecuta `supabase/rollback/20260924_lead_notification_claim_down.sql` (una transacción; conserva las columnas nuevas). Tras el rollback la web publicada funciona como antes; la función nueva no envía avisos pero sigue sin enviar a terceros. |
 | Paso 3: fallos en la web nueva | `git revert -m 1 <commit de merge>` en `main` (vuelve a la web anterior, compatible con la base migrada). La caché puede tardar ~10 min. |
+
+### Restaurar la copia CSV de `leads`
+
+El export del SQL Editor escribe los nulos como el texto `null`: hay que
+indicarlo al importar. Para restaurar en producción (SQL Editor no admite
+`\copy`; usa `psql` con la cadena de conexión, o importa el CSV desde el Table
+Editor) las columnas son las de la cabecera del CSV:
+
+```sql
+\copy public.leads (<columnas de la cabecera>) from 'leads.csv'
+  with (format csv, header true, null 'null')
+```
+
+Probado el 2026-09-24 en Postgres 17 con el esquema de producción, antes y
+después de la migración: 64/64 filas, ids únicos y `payload` JSON válido.
 
 Tras cualquier recuperación, ejecuta de nuevo el `pr0-checks.sh` del paso
 correspondiente y apunta qué se hizo y cuándo.

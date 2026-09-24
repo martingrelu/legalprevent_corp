@@ -12,6 +12,9 @@
 -- función nueva deja de enviar avisos (responde 500) pero sigue sin enviar
 -- emails a direcciones externas; la web nueva degrada la demo al formulario.
 --
+-- Las políticas públicas se recrean con el rol `public`, como están en
+-- producción (captura previa del 2026-09-24), no con `anon` como en schema.sql.
+--
 -- Todo o nada: se ejecuta en una única transacción.
 begin;
 
@@ -132,14 +135,14 @@ drop policy if exists "Public web can create leads" on public.leads;
 create policy "Public web can create leads"
 on public.leads
 for insert
-to anon
+to public
 with check (true);
 
 drop policy if exists "Public web can create diagnostics" on public.diagnostics;
 create policy "Public web can create diagnostics"
 on public.diagnostics
 for insert
-to anon
+to public
 with check (true);
 
 commit;

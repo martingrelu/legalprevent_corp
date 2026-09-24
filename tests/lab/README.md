@@ -2,7 +2,7 @@
 
 Reproduce en local, sin tocar producción, el entorno de captación de leads:
 
-- **Postgres 15** con los roles y privilegios por defecto de Supabase
+- **Postgres 17** (como producción) con los roles y privilegios por defecto de Supabase
   (`anon`, `authenticated`, `service_role`, `authenticator`).
 - **Dos bases**: `lab_old` (esquema publicado, igual que producción antes de
   PR0) y `lab` (esquema publicado + migración de PR0).

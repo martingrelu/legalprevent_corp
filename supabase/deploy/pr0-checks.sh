@@ -60,9 +60,13 @@ case "${1:-}" in
     check "la función reclama contra la base: id inexistente -> notified:false" '*"notified":false*' "$body"
     demo_probe="$(rest -X POST "$BASE/rest/v1/rpc/request_lead_demo" -d "{\"p_lead_id\":\"$RANDOM_ID\"}")"
     check "request_lead_demo existe y no marca ids inexistentes" "false" "$demo_probe"
-    check "anon ya no inserta directamente en leads (401)" "401" "$(rest -o /dev/null -w '%{http_code}' -X POST "$BASE/rest/v1/leads" -d '{"email":null}')"
-    check "anon ya no inserta directamente en diagnostics (401)" "401" "$(rest -o /dev/null -w '%{http_code}' -X POST "$BASE/rest/v1/diagnostics" -d '{"email":null}')"
-    check "anon ya no lee leads (401)" "401" "$(status -H "apikey: $KEY" -H "Authorization: Bearer $KEY" "$BASE/rest/v1/leads?select=id&limit=0")"
+    # Se exige el código de Postgres 42501 (permiso denegado) y no solo el HTTP
+    # 401: Supabase tiene abierta una incidencia de rechazos JWT intermitentes
+    # (401) que, si no, daría falsos positivos.
+    denied() { local out; out="$("$@")"; [[ "$out" == *42501* ]] && echo "42501" || echo "${out:0:120}"; }
+    check "anon ya no inserta directamente en leads (42501)" "42501" "$(denied rest -X POST "$BASE/rest/v1/leads" -d '{"email":null}')"
+    check "anon ya no inserta directamente en diagnostics (42501)" "42501" "$(denied rest -X POST "$BASE/rest/v1/diagnostics" -d '{"email":null}')"
+    check "anon ya no lee leads (42501)" "42501" "$(denied rest "$BASE/rest/v1/leads?select=id&limit=0")"
     # Solo si la migración está aplicada: con las funciones antiguas estas
     # llamadas SÍ insertarían un registro.
     if [[ "$demo_probe" == "false" ]]; then
@@ -71,10 +75,10 @@ case "${1:-}" in
     else
       echo "  ✖ migración no detectada: se omiten las sondas de privacidad para no crear registros"; fails=$((fails + 1))
     fi
-    # PostgREST devuelve el error 42501 (permiso denegado); según la versión el
-    # HTTP es 400/401, o 404 si oculta la función: cualquiera es correcto.
+    # Se exige el error 42501 (permiso denegado). "Función no encontrada"
+    # (PGRST202) NO vale: también ocurre si la migración no se ha aplicado.
     claim_probe="$(rest -w ' HTTP%{http_code}' -X POST "$BASE/rest/v1/rpc/claim_lead_notification" -d "{\"p_lead_id\":\"$RANDOM_ID\",\"p_kind\":\"new_lead\",\"p_hourly_cap\":1}")"
-    if [[ "$claim_probe" == *42501* || "$claim_probe" == *HTTP404* ]]; then claim_probe="denegado"; fi
+    if [[ "$claim_probe" == *42501* ]]; then claim_probe="denegado"; else claim_probe="${claim_probe:0:120}"; fi
     check "anon no puede reclamar avisos" "denegado" "$claim_probe"
     echo "  → Ejecuta ahora tests/sql/verify_pr0_migration.sql en el SQL Editor: debe mostrar 'OK: verificación PR0 superada'."
     ;;
