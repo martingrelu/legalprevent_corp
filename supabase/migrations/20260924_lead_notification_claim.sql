@@ -138,8 +138,21 @@ set search_path = public
 as $$
 declare
   inserted_id uuid;
-  v_email text := public.assert_public_submission(p_payload);
+  v_payload jsonb := p_payload;
+  v_email text;
 begin
+  -- Compatibilidad TEMPORAL con la web publicada antes de PR0 (páginas en
+  -- caché o migración aplicada antes de publicar la web): su diagnóstico no
+  -- envía `privacy_accepted`, pero su paso 1 exige la casilla de privacidad
+  -- junto al enlace a la política y el valor viaja en el payload
+  -- (company.privacy = "on"). Solo se usa si falta `privacy_accepted`: un
+  -- cliente nuevo que envíe false nunca pasa por aquí. Retirar en PR1.
+  if not (p_payload ? 'privacy_accepted')
+     and p_payload #>> '{payload,payload,company,privacy}' = 'on' then
+    v_payload := p_payload || '{"privacy_accepted": true}'::jsonb;
+  end if;
+  v_email := public.assert_public_submission(v_payload);
+
   insert into public.diagnostics (
     company_name,
     email,

@@ -145,6 +145,36 @@ begin
   end if;
   reset role;
 
+  -- 10. Compatibilidad temporal del diagnóstico publicado: solo si falta
+  --     privacy_accepted y el formulario antiguo marcó la casilla.
+  set local role anon;
+  v := public.submit_diagnostic('{"email":"legado@example.com","payload":{"payload":{"company":{"privacy":"on"}}}}');
+  if v->>'id' is null then raise exception 'FALLO: diagnóstico publicado con casilla marcada rechazado'; end if;
+  reset role;
+  foreach v in array array[
+    '{"email":"legado@example.com","payload":{"payload":{"company":{}}}}'::jsonb,
+    '{"email":"legado@example.com","payload":{"payload":{"company":{"privacy":"off"}}}}'::jsonb,
+    '{"email":"legado@example.com","privacy_accepted":false,"payload":{"payload":{"company":{"privacy":"on"}}}}'::jsonb
+  ] loop
+    begin
+      set local role anon;
+      perform public.submit_diagnostic(v);
+      raise exception 'FALLO: submit_diagnostic (compatibilidad) aceptó %', v;
+    exception when others then
+      reset role;
+      if sqlerrm like 'FALLO:%' then raise; end if;
+    end;
+  end loop;
+  -- La compatibilidad no se extiende a submit_lead.
+  begin
+    set local role anon;
+    perform public.submit_lead('{"email":"legado@example.com","payload":{"payload":{"company":{"privacy":"on"}}}}');
+    raise exception 'FALLO: submit_lead aceptó la compatibilidad del diagnóstico';
+  exception when others then
+    reset role;
+    if sqlerrm like 'FALLO:%' then raise; end if;
+  end;
+
   raise notice 'OK: verificación PR0 superada';
 end;
 $$;
