@@ -748,6 +748,26 @@ tbody tr {
   background: #e2e8f0;
 }
 
+.flag-pill {
+  display: inline-flex;
+  width: max-content;
+  margin: 6px 0 0 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.flag-pill.demo-request {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.flag-pill.privacy-review {
+  color: #92400e;
+  background: #fef3c7;
+}
+
 .text-link {
   color: var(--blue);
   font-weight: 800;

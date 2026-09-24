@@ -18,8 +18,17 @@ export function sign(payload) {
 
 export const ANON = sign({ role: "anon" });
 export const SERVICE = sign({ role: "service_role" });
+// Usuario del CRM con rol de administrador (app_metadata.crm_role = "admin"),
+// como en producción, y un usuario autenticado sin ese rol.
 export const AUTHENTICATED = sign({
   role: "authenticated",
   sub: "00000000-0000-4000-8000-000000000001",
   email: "crm@lab.invalid",
+  app_metadata: { crm_role: "admin" },
+});
+export const AUTHENTICATED_NO_ADMIN = sign({
+  role: "authenticated",
+  sub: "00000000-0000-4000-8000-000000000002",
+  email: "usuario@lab.invalid",
+  app_metadata: {},
 });

@@ -258,6 +258,8 @@ const buildDemoLead = (payload) => ({
 
 const demoFailureMessage =
   "No hemos podido registrar tu solicitud. Inténtalo de nuevo en unos minutos o escríbenos a legal@legalprevent.com.";
+const rateLimitedMessage =
+  "Hemos recibido muchas solicitudes en poco tiempo. Inténtalo de nuevo más tarde o escríbenos a legal@legalprevent.com.";
 
 document.querySelectorAll("form[data-form]").forEach((form) => {
   form.addEventListener("submit", async (event) => {
@@ -305,7 +307,7 @@ document.querySelectorAll("form[data-form]").forEach((form) => {
     });
 
     if (!result?.ok) {
-      if (feedback) feedback.textContent = demoFailureMessage;
+      if (feedback) feedback.textContent = result?.reason === "rate_limited" ? rateLimitedMessage : demoFailureMessage;
       if (submitButton) submitButton.disabled = false;
       return;
     }

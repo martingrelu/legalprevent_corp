@@ -38,8 +38,23 @@ export function psqlAsync(db, sql) {
 }
 export const psqlFile = (db, path, options) => psql(db, readFileSync(path, "utf8"), options);
 
+export const VERIFY_PR1A = `${ROOT}tests/sql/verify_pr1a_migration.sql`;
+
+// Límites de altas públicas (tabla private.settings de la base migrada).
+export const GENEROUS_LIMITS = { ip_per_hour: null, email_per_day: null, global_per_minute: null, global_per_hour: null };
+export function setLimits(limits, { ipSource = "none" } = {}) {
+  psql("lab", `update private.settings set value = '${JSON.stringify({ ...GENEROUS_LIMITS, ...limits })}'::jsonb where key = 'public_limits';
+    update private.settings set value = to_jsonb('${ipSource}'::text) where key = 'client_ip_source';`);
+}
+
+// Deja la base migrada vacía y con límites holgados (cada prueba de límites
+// fija los suyos). lab_old (producción actual) se vacía aparte si se usa.
 export async function reset(db = "lab") {
   psql(db, "truncate public.leads, public.diagnostics cascade;");
+  if (db === "lab") {
+    psql("lab", "truncate private.rate_counters;");
+    setLimits({});
+  }
   await fetch(`${GATEWAY}/__lab/reset`);
   await mode({ fn: "new", db: "new", resend: "ok", cap: 20 });
 }
@@ -63,6 +78,14 @@ export const callFunction = (body, origin = "http://127.0.0.1:8766") =>
 
 export const newLead = async (i = 0, extra = {}) =>
   (await rpc("submit_lead", { p_payload: { email: `lab${i}@example.com`, privacy_accepted: true, ...extra } })).id;
+
+// Llamada directa a PostgREST como anon con cabeceras de red simuladas.
+export const rpcWithHeaders = (name, args, headers = {}) =>
+  fetch(`${REST}/rpc/${name}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ANON}`, ...headers },
+    body: JSON.stringify(args),
+  }).then(async (r) => ({ status: r.status, body: await r.json() }));
 
 export const tally = (values) => values.reduce((acc, v) => ((acc[v] = (acc[v] || 0) + 1), acc), {});
 

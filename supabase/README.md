@@ -15,6 +15,10 @@
 6. Despliegue en producción de PR0: sigue `supabase/deploy/PR0.md` (orden
    función → migración → web, comprobaciones y recuperación ante errores).
    Laboratorio local reproducible: `tests/lab/run.sh` (ver `tests/lab/README.md`).
+7. PR1a (límites de altas públicas, consentimiento con fecha y versión,
+   permisos mínimos): `supabase/deploy/PR1a.md`. La configuración operativa
+   (límites, cabecera de IP) está en la tabla `private.settings`, que la API no
+   expone.
 
 ## 2. Crear usuario para el CRM
 

@@ -42,6 +42,10 @@
     return response.json();
   };
 
+  // Versiones de los textos que ve el visitante al marcar las casillas. El
+  // servidor valida que existan y estén vigentes, y registra la fecha.
+  const CONSENT_VERSIONS = { privacy: "2026-06-04", commercial: "2026-06-04" };
+
   // Un checkbox marcado llega como "on" desde FormData; los flujos que ya
   // conocen el valor pasan un booleano. Cualquier otro valor cuenta como "no".
   const isChecked = (value) => value === true || value === "on";
@@ -77,6 +81,8 @@
       recommended_plan: lead.recommendedPlan || "",
       commercial_consent: consents.commercialConsent,
       privacy_accepted: consents.privacyAccepted,
+      privacy_policy_version: CONSENT_VERSIONS.privacy,
+      ...(consents.commercialConsent ? { commercial_consent_version: CONSENT_VERSIONS.commercial } : {}),
       page_url: input.page || window.location.href,
       payload: input,
       created_at: new Date().toISOString()
@@ -142,6 +148,10 @@
         method: "POST",
         body: JSON.stringify({ p_payload: record })
       });
+      // Demasiadas altas en poco tiempo: el servidor no guarda nada.
+      if (row?.error === "rate_limited") {
+        return { ok: false, configured: true, reason: "rate_limited" };
+      }
       const savedRecord = { ...record, id: row?.id };
       const email = await sendLeadEmail(savedRecord.id);
       return { ok: true, configured: true, record: savedRecord, email };
@@ -165,6 +175,7 @@
       priorities: payload.result?.priorities || [],
       risks: payload.result?.risks || [],
       privacy_accepted: readConsents(input).privacyAccepted,
+      privacy_policy_version: CONSENT_VERSIONS.privacy,
       payload: input,
       created_at: new Date().toISOString()
     };
@@ -181,6 +192,9 @@
         method: "POST",
         body: JSON.stringify({ p_payload: record })
       });
+      if (row?.error === "rate_limited") {
+        return { ok: false, configured: true, reason: "rate_limited" };
+      }
       return { ok: true, configured: true, record: { ...record, id: row?.id } };
     } catch (error) {
       console.warn("No se pudo enviar el diagnóstico a Supabase", error);
