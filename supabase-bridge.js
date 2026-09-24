@@ -1,14 +1,14 @@
 (function () {
   const config = window.LEGAL_PREVENT_SUPABASE || {};
-  const pendingKey = "lp_pending_supabase_leads";
+  // Versiones anteriores guardaban aquí, en el navegador del visitante, los
+  // datos personales de los formularios que fallaban. Nadie leía esa cola: se
+  // elimina al cargar la página y ya no se escribe.
+  const legacyPendingKey = "lp_pending_supabase_leads";
   const sessionKey = "lp_supabase_session";
 
   const cleanBaseUrl = () => String(config.url || "").trim().replace(/\/$/, "");
   const anonKey = () => String(config.anonKey || "").trim();
   const isConfigured = () => Boolean(cleanBaseUrl() && anonKey());
-
-  const createId = (prefix) =>
-    `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
   const headers = (accessToken = "") => ({
     apikey: anonKey(),
@@ -16,20 +16,11 @@
     "Content-Type": "application/json"
   });
 
-  const savePending = (payload, reason) => {
-    try {
-      const pending = JSON.parse(localStorage.getItem(pendingKey) || "[]");
-      pending.unshift({
-        id: createId("pending"),
-        queuedAt: new Date().toISOString(),
-        reason,
-        payload
-      });
-      localStorage.setItem(pendingKey, JSON.stringify(pending.slice(0, 50)));
-    } catch (error) {
-      console.warn("No se pudo guardar el lead pendiente de Supabase", error);
-    }
-  };
+  try {
+    localStorage.removeItem(legacyPendingKey);
+  } catch {
+    // Almacenamiento no disponible (modo privado, bloqueado...): nada que limpiar.
+  }
 
   const request = async (path, options = {}) => {
     if (!isConfigured()) throw new Error("Supabase no está configurado.");
@@ -51,9 +42,25 @@
     return response.json();
   };
 
+  // Un checkbox marcado llega como "on" desde FormData; los flujos que ya
+  // conocen el valor pasan un booleano. Cualquier otro valor cuenta como "no".
+  const isChecked = (value) => value === true || value === "on";
+
+  // La aceptación de la política de privacidad (obligatoria) y el
+  // consentimiento para comunicaciones comerciales (opcional) son
+  // independientes: nunca se deduce uno del otro.
+  const readConsents = (input) => {
+    const form = input.form || {};
+    return {
+      privacyAccepted: isChecked(input.privacyAccepted) || isChecked(form.privacy),
+      commercialConsent: isChecked(input.commercialConsent) || isChecked(form.commercial)
+    };
+  };
+
   const buildLeadRecord = (input) => {
     const form = input.form || {};
     const lead = input.lead || {};
+    const consents = readConsents(input);
     return {
       source: input.eventType || form.source || "web",
       stage: input.leadStage || "new",
@@ -68,33 +75,30 @@
       score: input.payload?.result?.globalScore ?? input.score ?? null,
       risk_score: lead.riskScore ?? null,
       recommended_plan: lead.recommendedPlan || "",
-      commercial_consent: Boolean(form.commercial || input.commercialConsent),
-      privacy_accepted: Boolean(form.privacy || input.privacyAccepted),
+      commercial_consent: consents.commercialConsent,
+      privacy_accepted: consents.privacyAccepted,
       page_url: input.page || window.location.href,
       payload: input,
       created_at: new Date().toISOString()
     };
   };
 
-  const sendLeadEmail = async (input, leadRecord) => {
-    if (!isConfigured()) return { ok: false, configured: false };
+  // Pide el aviso interno de un lead ya guardado. Solo viaja su id: la Edge
+  // Function lee los datos del CRM y únicamente escribe al buzón interno.
+  const sendLeadEmail = async (leadId, kind = "new_lead") => {
+    if (!isConfigured() || !leadId) return { ok: false, configured: isConfigured() };
 
     try {
       const response = await fetch(`${cleanBaseUrl()}/functions/v1/smooth-action`, {
         method: "POST",
         headers: headers(),
-        body: JSON.stringify({
-          ...input,
-          lead: leadRecord || input.lead || {},
-          page: input.page || window.location.href
-        })
+        body: JSON.stringify({ leadId, kind })
       });
 
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw new Error(`Aviso interno respondió con estado ${response.status}.`);
       return { ok: true, result: await response.json() };
     } catch (error) {
-      savePending({ input, leadRecord }, "email_function_failed");
-      console.warn("No se pudo enviar el email automático", error);
+      console.warn("No se pudo enviar el aviso interno del lead", error);
       return { ok: false, error };
     }
   };
@@ -124,8 +128,12 @@
 
   const createLead = async (input) => {
     const record = buildLeadRecord(input);
+    // Sin aceptación de la política de privacidad no se envía ningún dato
+    // (el servidor también lo rechaza).
+    if (!record.privacy_accepted) {
+      return { ok: false, configured: isConfigured(), reason: "privacy_required" };
+    }
     if (!isConfigured()) {
-      savePending(record, "supabase_not_configured");
       return { ok: false, configured: false, record };
     }
 
@@ -134,11 +142,10 @@
         method: "POST",
         body: JSON.stringify({ p_payload: record })
       });
-      const savedRecord = row || record;
-      const email = await sendLeadEmail(input, savedRecord);
+      const savedRecord = { ...record, id: row?.id };
+      const email = await sendLeadEmail(savedRecord.id);
       return { ok: true, configured: true, record: savedRecord, email };
     } catch (error) {
-      savePending(record, "supabase_insert_failed");
       console.warn("No se pudo enviar el lead a Supabase", error);
       return { ok: false, configured: true, record, error };
     }
@@ -157,12 +164,15 @@
       critical_areas: payload.result?.criticalAreas || [],
       priorities: payload.result?.priorities || [],
       risks: payload.result?.risks || [],
+      privacy_accepted: readConsents(input).privacyAccepted,
       payload: input,
       created_at: new Date().toISOString()
     };
 
+    if (!record.privacy_accepted) {
+      return { ok: false, configured: isConfigured(), reason: "privacy_required" };
+    }
     if (!isConfigured()) {
-      savePending(record, "supabase_not_configured");
       return { ok: false, configured: false, record };
     }
 
@@ -171,11 +181,29 @@
         method: "POST",
         body: JSON.stringify({ p_payload: record })
       });
-      return { ok: true, configured: true, record: row || record };
+      return { ok: true, configured: true, record: { ...record, id: row?.id } };
     } catch (error) {
-      savePending(record, "supabase_diagnostic_insert_failed");
       console.warn("No se pudo enviar el diagnóstico a Supabase", error);
       return { ok: false, configured: true, record, error };
+    }
+  };
+
+  // Registra que el visitante pide una demostración tras su diagnóstico, sobre
+  // el mismo lead (sin crear otro) y avisa al buzón interno.
+  const requestLeadDemo = async (leadId) => {
+    if (!isConfigured() || !leadId) return { ok: false };
+
+    try {
+      const marked = await request("/rest/v1/rpc/request_lead_demo", {
+        method: "POST",
+        body: JSON.stringify({ p_lead_id: leadId })
+      });
+      if (marked !== true) return { ok: false };
+      const email = await sendLeadEmail(leadId, "demo_request");
+      return { ok: true, email };
+    } catch (error) {
+      console.warn("No se pudo registrar la solicitud de demostración", error);
+      return { ok: false, error };
     }
   };
 
@@ -319,6 +347,7 @@
     isConfigured,
     createLead,
     createDiagnostic,
+    requestLeadDemo,
     createCheckoutSession,
     sendLeadEmail,
     signIn,

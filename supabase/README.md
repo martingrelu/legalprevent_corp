@@ -5,6 +5,16 @@
 1. Entra en Supabase y crea un proyecto.
 2. Abre `SQL Editor`.
 3. Pega y ejecuta el archivo `schema.sql`.
+4. Ejecuta después, en orden, los archivos de `supabase/migrations/`.
+   `20260924_lead_notification_claim.sql` retira el alta directa de `anon`
+   (solo quedan las funciones `submit_lead` / `submit_diagnostic`, que exigen
+   la aceptación de la política de privacidad).
+5. Para comprobarla en una base de pruebas:
+   `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/sql/verify_pr0_migration.sql`
+   (se ejecuta en una transacción con ROLLBACK).
+6. Despliegue en producción de PR0: sigue `supabase/deploy/PR0.md` (orden
+   función → migración → web, comprobaciones y recuperación ante errores).
+   Laboratorio local reproducible: `tests/lab/run.sh` (ver `tests/lab/README.md`).
 
 ## 2. Crear usuario para el CRM
 
@@ -58,7 +68,13 @@ RESEND_API_KEY=TU_API_KEY_DE_RESEND
 LEAD_NOTIFY_EMAIL=tu-email-interno@legalprevent.com
 FROM_EMAIL=Legal Prevent <noreply@legalprevent.com>
 PUBLIC_SITE_URL=https://legalprevent.com
+# Opcionales
+LEAD_NOTIFY_HOURLY_CAP=20
+ALLOWED_ORIGINS=https://legalprevent.com,https://www.legalprevent.com
 ```
+
+`SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` los inyecta Supabase automáticamente
+en las Edge Functions: no hay que crearlos.
 
 No pongas `RESEND_API_KEY` en la web ni en GitHub.
 
@@ -80,9 +96,25 @@ En la configuración de Supabase, deja `Verify JWT with legacy secret` en OFF pa
 
 ### Flujo de email
 
-- Email interno: avisa de un nuevo lead.
-- Email al lead: confirma que la solicitud se ha recibido.
+- La web guarda el lead con `submit_lead` y después envía a la función **solo el
+  `leadId`** y el tipo de aviso (`new_lead` o `demo_request`).
+- Completar el diagnóstico crea un único lead (`source = diagnostic_completed`).
+  Si el visitante pide después una demostración, se marca ese mismo lead
+  (`demo_requested_at`, RPC `request_lead_demo`) y se envía un aviso de demo:
+  no se crea un segundo lead ni se modifica su consentimiento comercial.
+- La función lee el lead de `public.leads` con la service role y envía un único
+  email interno a `LEAD_NOTIFY_EMAIL`. Nunca envía emails a direcciones
+  facilitadas por el visitante (no hay email de confirmación al lead: la
+  confirmación se muestra en la página `/gracias/`).
+- Cada lead genera como máximo un aviso de cada tipo y solo en los 15 minutos
+  siguientes al alta o a la solicitud de demo. La reclamación y el tope global
+  de `LEAD_NOTIFY_HOURLY_CAP` avisos por hora (20 por defecto) se hacen en una
+  sola RPC con advisory lock (`claim_lead_notification`, solo service role).
+- Resend recibe una clave de idempotencia por lead y tipo: un reintento tras un
+  fallo no duplica el email.
 - Si el email falla, la captación no se bloquea: el lead sigue entrando en Supabase.
+- Si falla el alta del lead, la web muestra un aviso al visitante. No se guarda
+  ninguna copia de sus datos en el navegador.
 
 ## 7. Stripe Checkout
 

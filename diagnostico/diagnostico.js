@@ -124,8 +124,7 @@ const state = {
   company: {},
   answers: {},
   result: null,
-  source: "direct_diagnostic",
-  crmLeadId: ""
+  source: "direct_diagnostic"
 };
 
 if (diagnosticApp) {
@@ -192,6 +191,8 @@ if (diagnosticApp) {
     try {
       const raw = sessionStorage.getItem("lp_diagnostic_prefill");
       if (!raw) return;
+      // Los datos solo se necesitan para rellenar el formulario una vez.
+      sessionStorage.removeItem("lp_diagnostic_prefill");
 
       const prefill = JSON.parse(raw);
       state.source = prefill.source || "landing_diagnostic_cta";
@@ -201,16 +202,13 @@ if (diagnosticApp) {
         if (field && prefill[name]) field.value = prefill[name];
       });
 
-      const privacy = document.querySelector('[name="privacy"]');
-      if (privacy && prefill.privacy) privacy.checked = true;
-
-      const commercial = document.querySelector('[name="commercial"]');
-      if (commercial && prefill.commercial) commercial.checked = true;
-
+      // Las casillas de privacidad y comunicaciones comerciales nunca se
+      // premarcan: el visitante las marca aquí, junto a la información de
+      // privacidad, antes de que se guarde ningún dato.
       const heading = document.querySelector("[data-diagnostic-step='1'] .diagnostic-heading p");
       if (heading) {
         heading.textContent =
-          "Hemos cargado los datos enviados desde la landing. Revisa la información y continúa al cuestionario.";
+          "Hemos cargado los datos enviados desde la landing. Revisa la información, acepta la política de privacidad y continúa al cuestionario.";
       }
     } catch (error) {
       console.warn("No se pudo aplicar el prefill del diagnóstico", error);
@@ -397,154 +395,100 @@ if (diagnosticApp) {
     return "Starter";
   };
 
-  const monthlyRevenueFromPlan = (plan) => {
-    if (plan === "Starter") return 29;
-    if (plan === "Pro") return 79;
-    if (plan === "Premium") return 149;
-    return 590;
-  };
-
   const priorityFromResult = (result) => {
     if (result.globalScore < 50 || result.criticalAreas.length >= 3) return "Alta";
     if (result.globalScore < 75 || result.criticalAreas.length >= 1) return "Media";
     return "Baja";
   };
 
-  const createCrmId = (prefix) =>
-    `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-
-  const loadCrmState = () => {
-    try {
-      return JSON.parse(localStorage.getItem("legalprevent-crm-v1") || "null");
-    } catch {
-      return null;
-    }
-  };
-
-  const saveLeadToCrm = () => {
+  // Datos del lead para Supabase (CRM). No se guarda nada en el navegador del
+  // visitante: versiones anteriores copiaban el lead y el resultado del
+  // diagnóstico en localStorage sin que nadie lo leyera.
+  const buildCrmLead = () => {
     const result = state.result;
     if (!result) return null;
 
-    const now = new Date();
-    const nextActionAt = new Date(now);
-    nextActionAt.setDate(nextActionAt.getDate() + 1);
-
     const plan = recommendedPlanFromResult(result, state.company.employees);
-    const leadId = state.crmLeadId || createCrmId("lead");
-    const ownerId = "u-2";
-    const riskScore = 100 - result.globalScore;
-    const lead = {
-      id: leadId,
+    return {
       companyName: state.company.company,
       contactName: state.company.company,
       email: state.company.email,
       phone: state.company.phone,
       sector: state.company.sector,
       employees: parseEmployees(state.company.employees),
-      city: "",
-      source: "Web",
       status: "Interesado",
       priority: priorityFromResult(result),
-      createdAt: now.toISOString(),
-      lastInteractionAt: now.toISOString(),
-      nextActionAt: nextActionAt.toISOString(),
-      nextAction: "Contactar para revisar diagnóstico y agendar demo.",
-      notes: [
-        `Lead generado desde diagnóstico web (${state.source}).`,
-        `Cumplimiento: ${result.globalScore}/100 (${result.classification.label}).`,
-        `Áreas críticas: ${result.criticalAreas.map((item) => `${item.area} ${item.score}/100`).join(", ") || "Sin áreas críticas"}.`,
-        `Prioridades: ${result.priorities.join(" | ")}`
-      ].join("\n"),
-      ownerId,
       recommendedPlan: plan,
-      estimatedMonthlyRevenue: monthlyRevenueFromPlan(plan),
-      riskScore
+      riskScore: 100 - result.globalScore
     };
+  };
 
-    const crmState = loadCrmState() || {
-      users: [
-        { id: "u-1", name: "Marta Ruiz", email: "marta@legalprevent.com", role: "admin" },
-        { id: "u-2", name: "Alvaro Navas", email: "alvaro@legalprevent.com", role: "sales" }
-      ],
-      currentUserId: "u-1",
-      leads: [],
-      clients: [],
-      tasks: [],
-      interactions: [],
-      proposals: [],
-      payments: [],
-      documents: [],
-      notes: [],
-      activityLog: [],
-      alerts: [],
-      meta: { seededAt: now.toISOString(), version: 1, source: "legalprevent_web_bridge" }
-    };
+  // Consentimientos tal y como los marcó el visitante en el paso 1. Completar
+  // el diagnóstico no implica consentimiento comercial.
+  const consents = () => ({
+    privacyAccepted: state.company.privacy === "on",
+    commercialConsent: state.company.commercial === "on"
+  });
 
-    crmState.leads = crmState.leads || [];
-    crmState.interactions = crmState.interactions || [];
-    crmState.tasks = crmState.tasks || [];
-    crmState.documents = crmState.documents || [];
-    crmState.activityLog = crmState.activityLog || [];
+  // Un único lead y un único diagnóstico por envío de datos del paso 1: repetir
+  // el cálculo no crea duplicados. Si el alta falla, se permite reintentar.
+  let leadSubmission = null;
+  let diagnosticSubmission = null;
+  let submittedCompanyKey = "";
 
-    const existingIndex = crmState.leads.findIndex(
-      (item) => item.email === lead.email && item.companyName === lead.companyName
-    );
+  // Ejecuta el alta y, si falla, deja la referencia libre para reintentar.
+  const trackSubmission = (create, clear) =>
+    Promise.resolve(create()).then((result) => {
+      if (!result?.ok) clear();
+      return result || { ok: false };
+    });
 
-    if (existingIndex >= 0) {
-      lead.id = crmState.leads[existingIndex].id;
-      lead.createdAt = crmState.leads[existingIndex].createdAt || lead.createdAt;
-      crmState.leads[existingIndex] = { ...crmState.leads[existingIndex], ...lead };
-      state.crmLeadId = lead.id;
-    } else {
-      crmState.leads.unshift(lead);
-      state.crmLeadId = lead.id;
+  const saveDiagnosticLead = () => {
+    const companyKey = JSON.stringify(state.company);
+    if (companyKey !== submittedCompanyKey) {
+      leadSubmission = null;
+      diagnosticSubmission = null;
+      submittedCompanyKey = companyKey;
     }
 
-    crmState.interactions.unshift({
-      id: createCrmId("int"),
-      type: "Nota manual",
-      relatedType: "lead",
-      relatedId: lead.id,
-      date: now.toISOString(),
-      description: `Diagnóstico completado: ${result.globalScore}/100, clasificación ${result.classification.label}.`,
-      createdBy: ownerId
-    });
+    leadSubmission ||= trackSubmission(
+      () =>
+        window.LegalPreventSupabase?.createLead({
+          eventType: "diagnostic_completed",
+          leadStage: "qualified_diagnostic_completed",
+          payload: buildPayload(),
+          lead: buildCrmLead(),
+          ...consents(),
+          page: window.location.href
+        }),
+      () => {
+        leadSubmission = null;
+      }
+    );
 
-    crmState.tasks.unshift({
-      id: createCrmId("task"),
-      title: `Contactar a ${lead.companyName}`,
-      description: "Lead captado desde el diagnóstico web. Revisar informe y proponer demo.",
-      relatedType: "lead",
-      relatedId: lead.id,
-      dueDate: nextActionAt.toISOString(),
-      priority: lead.priority,
-      status: "Pendiente",
-      ownerId
-    });
+    diagnosticSubmission ||= trackSubmission(
+      () =>
+        window.LegalPreventSupabase?.createDiagnostic({
+          eventType: "diagnostic_completed",
+          payload: buildPayload(),
+          ...consents(),
+          page: window.location.href
+        }),
+      () => {
+        diagnosticSubmission = null;
+      }
+    );
 
-    crmState.documents.unshift({
-      id: createCrmId("doc"),
-      relatedType: "lead",
-      relatedId: lead.id,
-      name: "Informe de diagnóstico inicial",
-      type: "diagnostic",
-      createdAt: now.toISOString()
-    });
+    return leadSubmission;
+  };
 
-    crmState.activityLog.unshift({
-      id: createCrmId("log"),
-      entityType: "lead",
-      entityId: lead.id,
-      action: existingIndex >= 0 ? "diagnostic_update" : "diagnostic_create",
-      detail: `Lead ${existingIndex >= 0 ? "actualizado" : "creado"} desde diagnóstico web.`,
-      createdAt: now.toISOString(),
-      createdBy: ownerId
-    });
+  const leadFailureMessage =
+    "No hemos podido registrar tus datos para que te contactemos. Puedes descargar el informe y escribirnos a legal@legalprevent.com.";
 
-    localStorage.setItem("legalprevent-crm-v1", JSON.stringify(crmState));
-    sessionStorage.setItem("lp_last_crm_lead_id", lead.id);
-    console.info("LEGAL PREVENT CRM lead saved", lead);
-    return lead;
+  const showLeadFailure = (result) => {
+    if (result?.ok) return;
+    const feedback = document.querySelector("[data-diagnostic-feedback]");
+    if (feedback) feedback.textContent = leadFailureMessage;
   };
 
   const pdfText = (value) => {
@@ -808,21 +752,7 @@ if (diagnosticApp) {
     }
     const result = calculateResult();
     renderResult(result);
-    const crmLead = saveLeadToCrm();
-    window.LegalPreventSupabase?.createLead({
-      eventType: "diagnostic_completed",
-      leadStage: "qualified_diagnostic_completed",
-      payload: buildPayload(),
-      crmLead,
-      page: window.location.href
-    });
-    window.LegalPreventSupabase?.createDiagnostic({
-      eventType: "diagnostic_completed",
-      payload: buildPayload(),
-      crmLead,
-      page: window.location.href
-    });
-    console.info("LEGAL PREVENT diagnostic payload", { ...buildPayload(), crmLead });
+    saveDiagnosticLead().then(showLeadFailure);
     showStep(3);
   });
 
@@ -836,15 +766,19 @@ if (diagnosticApp) {
     const feedback = document.querySelector("[data-diagnostic-feedback]");
     if (feedback) feedback.textContent = "Informe profesional descargado. Puedes compartirlo internamente o revisarlo con nuestro equipo.";
   });
-  document.querySelector("[data-demo-request]")?.addEventListener("click", () => {
-    const crmLead = saveLeadToCrm();
-    window.LegalPreventSupabase?.createLead({
-      eventType: "diagnostic_demo_requested",
-      leadStage: "diagnostic_to_demo",
-      payload: buildPayload(),
-      crmLead,
-      page: window.location.href
-    });
-    console.info("LEGAL PREVENT demo request from diagnostic", { ...buildPayload(), crmLead });
+  // La demostración se registra sobre el lead del diagnóstico (sin crear
+  // otro). Si ese lead no existe, se lleva al formulario de demostración de la
+  // portada, que pide sus propios datos y consentimientos.
+  document.querySelector("[data-demo-request]")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget;
+    const fallbackUrl = button.getAttribute("href") || "../#contacto";
+    button.setAttribute("aria-disabled", "true");
+
+    const lead = leadSubmission ? await leadSubmission : null;
+    const leadId = lead?.ok ? lead.record?.id : null;
+    const demo = leadId ? await window.LegalPreventSupabase?.requestLeadDemo?.(leadId) : null;
+
+    window.location.href = demo?.ok ? "../gracias/?origen=demo" : fallbackUrl;
   });
 }
