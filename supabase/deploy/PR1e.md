@@ -1,5 +1,13 @@
 # Runbook de despliegue · PR1e (checkout público y funciones sobrantes)
 
+> **Estado (25/09/2026): desplegado y después retirado.** Tras desplegarlo se
+> comprobó que la web no usa `super-api` (los botones de precios llevan a
+> `legalprevent.legal/comprar` desde el 2/07/2026). El usuario borró
+> `super-api`, `dynamic-endpoint` y `rapid-api` (las tres responden 404) y el
+> código del checkout se quitó del repositorio y de la web. `checkout_allow` y
+> `checkout_limits` siguen en la base sin uso. Este runbook queda como
+> historial; `pr1e-checks.sh after-function` ya no aplica.
+
 La función de checkout de la web (`super-api`, código en
 `supabase/functions/create-checkout-session`) aceptaba cualquier URL de retorno
 (una sesión de pago de LegalPrevent podía acabar en otra web), respondía a

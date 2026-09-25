@@ -109,29 +109,6 @@
     }
   };
 
-  const createCheckoutSession = async (input) => {
-    if (!isConfigured()) throw new Error("Supabase no está configurado.");
-
-    const response = await fetch(`${cleanBaseUrl()}/functions/v1/super-api`, {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify({
-        plan: input.plan,
-        email: input.email || "",
-        successUrl: input.successUrl || `${window.location.origin}/gracias/?origen=stripe`,
-        cancelUrl: input.cancelUrl || `${window.location.origin}/#precios`,
-        page: input.page || window.location.href
-      })
-    });
-
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.url) {
-      throw new Error(result.error || `Stripe respondió con estado ${response.status}.`);
-    }
-
-    return result;
-  };
-
   const createLead = async (input) => {
     const record = buildLeadRecord(input);
     // Sin aceptación de la política de privacidad no se envía ningún dato
@@ -387,7 +364,6 @@
     createLead,
     createDiagnostic,
     requestLeadDemo,
-    createCheckoutSession,
     sendLeadEmail,
     signIn,
     signOut,
