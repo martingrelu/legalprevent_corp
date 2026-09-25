@@ -199,13 +199,15 @@ En la función `stripe-webhook` deja también la verificación JWT en OFF (Strip
 https://wtpfrlsbfishvworjdtr.supabase.co/functions/v1/stripe-webhook
 ```
 
-Eventos recomendados:
+Eventos necesarios (sin `customer.subscription.updated` las suscripciones se quedan en `incomplete`; ver `supabase/deploy/PR1d.md`):
 
 ```text
 checkout.session.completed
 customer.subscription.created
 customer.subscription.updated
 customer.subscription.deleted
+customer.subscription.paused
+customer.subscription.resumed
 invoice.paid
 invoice.payment_failed
 ```

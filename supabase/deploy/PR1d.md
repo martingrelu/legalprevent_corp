@@ -9,6 +9,19 @@ tocar nada en Stripe) y recupera los eventos perdidos.
 Orden: **migración → función → reenvío de eventos**. La función necesita la RPC
 `stripe_record_event`; sin ella respondería 500 y Stripe reintentaría.
 
+## Eventos que debe escuchar el destino de Stripe
+
+`checkout.session.completed`, `customer.subscription.created`,
+**`customer.subscription.updated`**, `customer.subscription.deleted`,
+`customer.subscription.paused`, `customer.subscription.resumed`,
+`invoice.paid`, `invoice.payment_failed` (y, solo registrados:
+`customer.created`, `customer.deleted`, `invoice_payment.paid`).
+
+Sin `customer.subscription.updated` una suscripción se queda en `incomplete`
+(Stripe la crea así y la activa con ese evento) y no llegan renovaciones,
+cambios de plan ni cancelaciones programadas. Stripe no permite reenviar a un
+destino un evento que no escuchaba cuando se generó.
+
 ## 0. Preparación
 - [ ] `tests/lab/run.sh` en verde en la rama.
 - [ ] `supabase/deploy/pr1d-checks.sh pre` → `todo correcto`.
