@@ -1,6 +1,7 @@
 // Gateway del laboratorio con la misma estructura de URLs que Supabase.
 //   /rest/v1/*                   -> PostgREST (base migrada "new" o sin migrar "old")
 //   /functions/v1/smooth-action  -> función nueva (repo) o publicada (git ref)
+//   /functions/v1/stripe-webhook -> webhook de Stripe del repo (base migrada)
 //   /__lab/mode?fn=&db=&resend=&cap=   cambia el escenario
 //   /__lab/emails, /__lab/reset         Resend simulado
 // Opcionalmente sirve la web nueva y la publicada (LAB_SITES) con
@@ -23,6 +24,7 @@ const handlers = {
   new: (await import(process.env.LAB_NEW_FUNCTION)).handleRequest,
   published: (await import("./published-fn.mjs")).handleRequest,
 };
+const stripeWebhook = (await import("../../supabase/functions/stripe-webhook/index.ts")).handleRequest;
 
 // ---- Resend simulado, con la semántica de idempotencia documentada ----
 const resend = { mode: "ok", delivered: [], attempts: [], keys: new Map() };
@@ -55,6 +57,7 @@ const env = {
   FROM_EMAIL: "Legal Prevent <noreply@lab.invalid>",
   ALLOWED_ORIGINS: ["http://127.0.0.1:8766", "http://127.0.0.1:8767", ...SITES.map((s) => `http://127.0.0.1:${s.port}`)].join(","),
   LEAD_NOTIFY_HOURLY_CAP: "20",
+  STRIPE_WEBHOOK_SECRET: "whsec_lab_no_real",
 };
 const scenario = { fn: "new", db: "new" };
 
@@ -96,6 +99,16 @@ http.createServer(async (req, res) => {
         body: ["GET", "HEAD"].includes(req.method) ? undefined : body,
       });
       const response = await handlers[scenario.fn](request, { env: (k) => env[k], fetch: labFetch });
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      return res.end(Buffer.from(await response.arrayBuffer()));
+    }
+    if (url.pathname === "/functions/v1/stripe-webhook") {
+      const request = new Request(url, {
+        method: req.method,
+        headers: req.headers,
+        body: ["GET", "HEAD"].includes(req.method) ? undefined : body,
+      });
+      const response = await stripeWebhook(request, { env: (k) => env[k], fetch });
       res.writeHead(response.status, Object.fromEntries(response.headers));
       return res.end(Buffer.from(await response.arrayBuffer()));
     }

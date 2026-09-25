@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, psql, psqlFile, reset } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, psql, psqlFile, reset } from "./helpers.mjs";
 
 const PR1A = [
   `${ROOT}supabase/migrations/20260925_crm_admin_policies.sql`,
@@ -243,4 +243,54 @@ test("rollback de PR1c: retira las funciones, conserva registros y se puede reap
     psql("lab", "delete from private.erasure_log where email_hash = 'hash-prueba';");
   }
   assert.equal(verifyPr1c(), "OK: verificación PR1c superada");
+});
+
+// ---------------------------------------------------------------------------
+// PR1d · webhook de Stripe
+// ---------------------------------------------------------------------------
+const PR1D = `${ROOT}supabase/migrations/20260928_stripe_webhook.sql`;
+const PR1D_ROLLBACK = `${ROOT}supabase/rollback/20260928_stripe_webhook_down.sql`;
+const RECORD = "public.stripe_record_event(text,text,timestamp with time zone,text,jsonb)";
+const verifyPr1d = () => result("lab", VERIFY_PR1D);
+
+test("la migración de PR1d se puede reaplicar y verify_pr1d_migration.sql supera todos los bloques", () => {
+  psqlFile("lab", PR1D);
+  psqlFile("lab", PR1D);
+  assert.equal(verifyPr1d(), "OK: verificación PR1d superada");
+  assert.equal(verifyPr1c(), "OK: verificación PR1c superada", "PR1d no rompe PR1c");
+  assert.equal(verifyPr1a(), "OK: verificación PR1a superada", "PR1d no rompe PR1a");
+});
+
+test("el verificador de PR1d detecta vulnerabilidades y errores reintroducidos", () => {
+  psql("lab", `grant execute on function ${RECORD} to anon;`);
+  try {
+    assert.match(verifyPr1d(), /FALLO: anon pudo registrar eventos/);
+  } finally {
+    psql("lab", `revoke execute on function ${RECORD} from anon;`);
+  }
+
+  withFunctionMutation(RECORD,
+    "where t.stripe_event_created is null or t.stripe_event_created <= excluded.stripe_event_created;\n    get diagnostics v_rows = row_count;\n\n  elsif p_kind = 'payment'",
+    ";\n    get diagnostics v_rows = row_count;\n\n  elsif p_kind = 'payment'", () =>
+      assert.match(verifyPr1d(), /FALLO: un evento antiguo no se marcó como antiguo/));
+
+  withFunctionMutation(RECORD,
+    "on conflict (event_id) do nothing;\n  if not found then",
+    "on conflict (event_id) do nothing;\n  if false then", () =>
+      assert.match(verifyPr1d(), /FALLO: no detectó el duplicado/));
+
+  assert.equal(verifyPr1d(), "OK: verificación PR1d superada");
+});
+
+test("rollback de PR1d: retira la función, conserva el registro de eventos y se puede reaplicar", () => {
+  psql("lab", "insert into private.stripe_events (event_id, type, event_created, kind, outcome) values ('evt_rollback', 'invoice.paid', now(), 'payment', 'applied');");
+  try {
+    psqlFile("lab", PR1D_ROLLBACK);
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname = 'stripe_record_event'"), "0");
+    assert.equal(psql("lab", "select count(*) from private.stripe_events where event_id = 'evt_rollback'"), "1");
+  } finally {
+    psqlFile("lab", PR1D);
+    psql("lab", "delete from private.stripe_events where event_id = 'evt_rollback';");
+  }
+  assert.equal(verifyPr1d(), "OK: verificación PR1d superada");
 });

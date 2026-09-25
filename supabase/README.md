@@ -24,6 +24,9 @@
 9. PR1c (conservación de 12 meses —desactivada hasta la validación jurídica—,
    supresión a petición del interesado y retirada del consentimiento
    comercial desde el CRM): `supabase/deploy/PR1c.md`.
+10. PR1d (webhook de Stripe `stripe-webhook`: firma con tolerancia de 5 min,
+    API 2026-04-22, sin duplicados ni eventos desordenados, 500 si la base
+    falla): `supabase/deploy/PR1d.md`.
 
 ## 2. Crear usuario para el CRM
 
@@ -190,7 +193,7 @@ supabase functions deploy stripe-webhook --project-ref wtpfrlsbfishvworjdtr
 
 En la función `create-checkout-session`, deja `Verify JWT with legacy secret` en OFF para permitir que la web pública cree sesiones de pago controladas.
 
-En la función `stripe-webhook`, Stripe enviará eventos del servidor. Configura el endpoint en Stripe:
+En la función `stripe-webhook` deja también la verificación JWT en OFF (Stripe no envía JWT; la autenticación es la firma). Stripe enviará eventos del servidor. Configura el endpoint en Stripe:
 
 ```text
 https://wtpfrlsbfishvworjdtr.supabase.co/functions/v1/stripe-webhook

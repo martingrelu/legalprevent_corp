@@ -64,6 +64,7 @@ Elimina contenedores y red.
 | `crm.lab.mjs` | CRM nuevo y publicado con usuario administrador: sincronización, edición sin alterar consentimiento ni avisos, alta manual; usuario sin rol: sin acceso. |
 | `budget.lab.mjs` | Contabilidad del agente (PR1b): 200 reservas simultáneas sin superar el presupuesto (y prueba de que sin advisory lock se supera), liquidaciones y liberaciones concurrentes al céntimo, alertas únicas, límites por sesión y por día, apagado, permisos y eventos sin datos personales. |
 | `privacy.lab.mjs` | PR1c de extremo a extremo con el CRM real: supresión (leads, diagnósticos y consentimientos, registro sin email), usuario sin rol, retirada del consentimiento, vista previa y ejecución de la conservación, CRM publicado. |
+| `stripe-webhook.lab.mjs` | PR1d de extremo a extremo con eventos firmados de la API 2026-04-22: alta completa, eventos desordenados (y mutación que demuestra la comprobación), 20 entregas simultáneas del mismo evento, fallo de la base (500 y reintento), firma inválida o antigua, permisos. |
 | `stripe.lab.mjs` | Webhook (service role) sigue escribiendo; `anon` sin acceso; el CRM administrador solo lee. |
 
 Con `--serve` también se pueden ensayar las comprobaciones de despliegue
