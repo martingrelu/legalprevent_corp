@@ -1,4 +1,4 @@
-# Laboratorio local de PR0
+# Laboratorio local (PR0, PR1)
 
 Reproduce en local, sin tocar producción, el entorno de captación de leads:
 
@@ -56,12 +56,13 @@ Elimina contenedores y red.
 
 | Fichero | Contenido |
 |---|---|
-| `sql.lab.mjs` | Verificadores de PR0 (sobre la réplica de producción) y PR1a, migraciones reaplicables, 6 mutaciones de seguridad que el verificador debe detectar y matriz de permisos de `anon`/`authenticated`. |
+| `sql.lab.mjs` | Verificadores de PR0 y PR1a (sobre la réplica de producción) y de la rama, migraciones reaplicables, 6 mutaciones de seguridad que el verificador debe detectar y matriz de permisos de `anon`/`authenticated`. |
 | `limits.lab.mjs` | Límites de altas públicas con 100 peticiones simultáneas: por email, global, cierre de emergencia, por IP (incluida la cabecera falseada), sin IP configurada y sin datos parciales al rechazar. |
 | `concurrency.lab.mjs` | Avisos internos: reclamaciones simultáneas, tope horario (y prueba de que sin advisory lock se supera), sesiones `psql` independientes, idempotencia ante fallos de Resend, plazos, CORS y destinatarios arbitrarios. |
 | `flows.lab.mjs` | Web nueva: demo con/sin comunicaciones comerciales, diagnóstico + demo sobre el mismo lead, privacidad obligatoria, nada en el navegador. |
 | `compat.lab.mjs` | Web publicada contra la base de la rama, límite superado con la web antigua y la nueva, web nueva sobre la base sin migrar (orden de despliegue) y rollback con reaplicación. |
 | `crm.lab.mjs` | CRM nuevo y publicado con usuario administrador: sincronización, edición sin alterar consentimiento ni avisos, alta manual; usuario sin rol: sin acceso. |
+| `budget.lab.mjs` | Contabilidad del agente (PR1b): 200 reservas simultáneas sin superar el presupuesto (y prueba de que sin advisory lock se supera), liquidaciones y liberaciones concurrentes al céntimo, alertas únicas, límites por sesión y por día, apagado, permisos y eventos sin datos personales. |
 | `stripe.lab.mjs` | Webhook (service role) sigue escribiendo; `anon` sin acceso; el CRM administrador solo lee. |
 
 Con `--serve` también se pueden ensayar las comprobaciones de despliegue

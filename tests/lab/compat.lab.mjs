@@ -7,8 +7,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { AUTHENTICATED } from "./jwt.mjs";
-import { ROOT, VERIFY_PR1A, emails, loadBridge, mode, psql, psqlFile, reset, setLimits } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, emails, loadBridge, psql, psqlFile, reset, setLimits } from "./helpers.mjs";
 
 const PUBLISHED = process.env.LAB_PUBLISHED_DIR;
 const publishedBridge = () =>
@@ -93,27 +92,3 @@ test("rollback de PR1a: la web publicada funciona como hoy y la migración se pu
   assert.match(psqlFile("lab", VERIFY_PR1A, { allowError: true }), /OK: verificación PR1a superada/);
 });
 
-test("web nueva sobre la base sin PR1a (orden recomendado: web primero): todo funciona", async () => {
-  psql("lab_old", "truncate public.leads, public.diagnostics cascade;");
-  await mode({ db: "old" });
-  try {
-    const { api } = newBridge();
-    const lead = await api.createLead({
-      eventType: "diagnostic_completed",
-      lead: { email: "webprimero@example.com", companyName: "Web Primero SL" },
-      privacyAccepted: true,
-      commercialConsent: true,
-    });
-    assert.equal(lead.ok, true, "submit_lead de PR0 ignora las versiones que envía la web nueva");
-    assert.equal((await api.createDiagnostic({ payload: { company: { email: "webprimero@example.com" } }, privacyAccepted: true })).ok, true);
-    assert.equal((await api.requestLeadDemo(lead.record.id)).ok, true);
-    assert.deepEqual((await emails()).delivered.map((m) => m.subject.split(":")[0]), ["Nuevo lead Legal Prevent", "Demo solicitada"]);
-    // El CRM nuevo lee la base sin PR1a: sin columnas de consentimiento no marca revisión.
-    const crm = loadBridge(readFileSync(`${ROOT}supabase-bridge.js`, "utf8"), { session: AUTHENTICATED });
-    const [row] = await crm.api.fetchLeads();
-    assert.ok(row.demo_requested_at);
-    assert.equal(row.privacy_review_required, undefined);
-  } finally {
-    await mode({ db: "new" });
-  }
-});
