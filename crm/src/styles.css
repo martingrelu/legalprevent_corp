@@ -1354,3 +1354,14 @@ pre {
     width: 100%;
   }
 }
+
+.retention-status {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.primary-button.danger {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}

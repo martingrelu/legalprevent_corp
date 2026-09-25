@@ -11,7 +11,7 @@ import {
   ROLES,
   TASK_STATUSES,
   SCHEMA,
-} from "./models.js?v=20260925-1";
+} from "./models.js?v=20260927-1";
 import {
   addInteraction,
   applyAutomations,
@@ -32,6 +32,7 @@ import {
   isSourceLocked,
   leadFromSupabaseRow,
   leadOriginFromRow,
+  removeLeadAndRelated,
   leadSourceOptions,
   leadScore,
   loadState,
@@ -47,8 +48,8 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20260925-1";
-import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20260925-1";
+} from "./store.js?v=20260927-1";
+import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20260927-1";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();
@@ -287,6 +288,7 @@ function renderDashboard() {
           <p class="eyebrow">Datos comerciales</p>
           <h2>${realLeadCount} leads reales sincronizados</h2>
           <p>${demoLeadCount ? `${demoLeadCount} leads demo siguen disponibles para pruebas.` : "Dashboard limpio, sin leads demo."}</p>
+          ${renderRetentionStatus(state.meta?.retentionPreview)}
         </div>
         <div class="button-row">
           <a class="secondary-button" href="#/leads?origin=real">Ver leads reales</a>
@@ -477,6 +479,65 @@ function renderLeadFlags(lead) {
   ].join("");
 }
 
+function renderRetentionStatus(preview) {
+  if (!preview) return "";
+  const estado = preview.enabled ? "activada" : "desactivada (pendiente de validación jurídica)";
+  return `<p class="retention-status">Conservación de ${escapeHtml(preview.months)} meses: ${estado} · ${escapeHtml(preview.leads)} leads y ${escapeHtml(preview.diagnostics)} diagnósticos cumplirían el plazo · ${escapeHtml(preview.privacy_review_pending)} leads pendientes de revisión jurídica.</p>`;
+}
+
+// Supresión y retirada del consentimiento: solo para leads sincronizados con
+// Supabase (el servidor comprueba además que el usuario es administrador).
+function renderPrivacyPanel(lead) {
+  if (!isRealLead(lead) || !lead.supabaseId) return "";
+  return `
+    <article class="panel">
+      <div class="panel-header"><h3>Protección de datos</h3></div>
+      <p class="note-block">La supresión borra todos los leads y diagnósticos con este email y queda registrada sin guardar el email. La retirada del consentimiento comercial queda registrada con su fecha.</p>
+      <div class="button-row">
+        ${lead.commercialConsent ? `<button class="secondary-button" data-action="open-withdraw-consent-modal" data-id="${lead.id}">Retirar consentimiento comercial</button>` : ""}
+        <button class="ghost-button danger-lite" data-action="open-erase-modal" data-id="${lead.id}">Eliminar por solicitud de supresión</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderEraseModal(lead) {
+  return modal(
+    "Eliminar por solicitud de supresión",
+    `
+      <form class="modal-form" data-form="erase-contact" data-id="${lead.id}">
+        <div class="backup-box">
+          <strong>Esta acción no se puede deshacer.</strong>
+          <p>Se borrarán en Supabase todos los leads y diagnósticos de <strong>${escapeHtml(lead.email)}</strong>. Escribe el email para confirmar.</p>
+        </div>
+        <div class="form-grid">
+          ${inputField("confirmEmail", "Email del contacto", "", "email")}
+          ${inputField("reason", "Motivo (sin datos personales)", "Solicitud de supresión del interesado")}
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
+          <button class="primary-button danger" type="submit">Eliminar definitivamente</button>
+        </div>
+      </form>
+    `,
+  );
+}
+
+function renderWithdrawConsentModal(lead) {
+  return modal(
+    "Retirar consentimiento comercial",
+    `
+      <form class="modal-form" data-form="withdraw-consent" data-id="${lead.id}">
+        <p>${escapeHtml(lead.companyName)} dejará de recibir comunicaciones comerciales. Quedará registrada la fecha de la retirada.</p>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
+          <button class="primary-button" type="submit">Retirar consentimiento</button>
+        </div>
+      </form>
+    `,
+  );
+}
+
 // Texto plano: keyValues() ya escapa los valores.
 function consentLabel(at, version) {
   return at ? `Sí · ${formatDateTime(at)}${version ? ` · versión ${version}` : ""}` : "No";
@@ -623,7 +684,9 @@ function renderLeadDetail(id) {
             ...(lead.demoRequestedAt ? [["Demo solicitada desde la web", formatDateTime(lead.demoRequestedAt)]] : []),
             ...(isRealLead(lead) && lead.consentTracked ? [
               ["Privacidad aceptada", lead.privacyReviewRequired ? "Sin prueba de fecha/versión · pendiente de revisión jurídica" : consentLabel(lead.privacyAcceptedAt, lead.privacyPolicyVersion)],
-              ["Comunicaciones comerciales", lead.commercialConsent ? consentLabel(lead.commercialConsentAt, lead.commercialConsentVersion) : "No"],
+              ["Comunicaciones comerciales", lead.commercialConsent
+                ? consentLabel(lead.commercialConsentAt, lead.commercialConsentVersion)
+                : lead.commercialConsentWithdrawnAt ? `No · retirado el ${formatDateTime(lead.commercialConsentWithdrawnAt)}` : "No"],
             ] : []),
             ["Proxima accion", lead.nextActionAt ? `${lead.nextAction} · ${formatDateTime(lead.nextActionAt)}` : "Sin acción"],
             ...(lead.status === "Perdido" ? [["Motivo de perdida", optionLabel(LOST_REASONS, lead.lostReason) || "Sin indicar"]] : []),
@@ -638,6 +701,8 @@ function renderLeadDetail(id) {
           ${notes.map((note) => `<p class="note-block">${escapeHtml(note.body)}<small>${formatDateTime(note.createdAt)}</small></p>`).join("")}
         </article>
       </div>
+
+      ${renderPrivacyPanel(lead)}
 
       <div class="three-column">
         ${relatedPanel("Tareas pendientes", relatedTasks.map(renderTaskRow).join("") || emptyText("Sin tareas"))}
@@ -1379,6 +1444,40 @@ async function handleSubmit(event) {
       return;
     }
 
+    if (formType === "erase-contact") {
+      const lead = state.leads.find((item) => item.id === form.dataset.id);
+      if (!lead) throw new Error("Lead no encontrado.");
+      const formData = new FormData(form);
+      const typed = String(formData.get("confirmEmail") || "").trim().toLowerCase();
+      if (typed !== String(lead.email || "").trim().toLowerCase()) {
+        throw new Error("El email escrito no coincide con el del lead.");
+      }
+      const result = await window.LegalPreventSupabase.eraseContact(lead.email, String(formData.get("reason") || ""));
+      state = removeLeadAndRelated(state, lead.id);
+      saveState(state);
+      closeModal();
+      // El cambio de ruta vuelve a pintar la página (y el aviso) al disparar hashchange.
+      window.addEventListener("hashchange", () => {
+        showToast(`Contacto suprimido: ${result.leads_deleted} leads y ${result.diagnostics_deleted} diagnósticos.`);
+      }, { once: true });
+      go("leads");
+      return;
+    }
+
+    if (formType === "withdraw-consent") {
+      const lead = state.leads.find((item) => item.id === form.dataset.id);
+      if (!lead?.supabaseId) throw new Error("Lead no encontrado.");
+      const result = await window.LegalPreventSupabase.withdrawCommercialConsent(lead.supabaseId);
+      if (result.status === "withdrawn" || result.status === "not_consented") {
+        Object.assign(lead, { commercialConsent: false, commercialConsentWithdrawnAt: lead.commercialConsentWithdrawnAt || new Date().toISOString() });
+        saveState(state);
+      }
+      closeModal();
+      render();
+      showToast(result.status === "withdrawn" ? "Consentimiento comercial retirado." : "Este lead ya no tenía consentimiento comercial.");
+      return;
+    }
+
     const formData = new FormData(form);
     if (formType === "lead") {
       const previousState = state;
@@ -1458,6 +1557,14 @@ function handleClick(event) {
     showToast("Sesión de Supabase cerrada.");
   }
   if (action === "close-modal") closeModal();
+  if (action === "open-erase-modal") {
+    const lead = state.leads.find((item) => item.id === button.dataset.id);
+    if (lead) openModal(renderEraseModal(lead));
+  }
+  if (action === "open-withdraw-consent-modal") {
+    const lead = state.leads.find((item) => item.id === button.dataset.id);
+    if (lead) openModal(renderWithdrawConsentModal(lead));
+  }
   if (action === "open-lead-modal") openModal(renderLeadModal(state.leads.find((lead) => lead.id === button.dataset.id)));
   if (action === "open-client-modal") {
     const client = state.clients.find((item) => item.id === button.dataset.id);
@@ -1519,6 +1626,15 @@ async function syncSupabaseData() {
       const result = syncBillingIntoCrm(billing, now);
       activated = result.activated;
       syncedPayments = result.syncedPayments;
+    }
+
+    // Estado de la conservación de contactos (solo recuentos). Si la base aún
+    // no tiene la función, no se muestra.
+    try {
+      const retention = await window.LegalPreventSupabase.retentionPreview?.();
+      state.meta = { ...(state.meta || {}), retentionPreview: retention ? { ...retention, checkedAt: now } : null };
+    } catch {
+      state.meta = { ...(state.meta || {}), retentionPreview: null };
     }
 
     saveState(state);

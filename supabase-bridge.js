@@ -357,6 +357,31 @@
     };
   };
 
+  // Funciones del CRM administrador (conservación y supresión). El servidor
+  // comprueba el rol; aquí solo se traducen los errores a un mensaje claro.
+  const crmErrorMessages = {
+    not_allowed: "Tu usuario no tiene permiso de administrador del CRM.",
+    email_invalid: "El email no es válido.",
+    reason_invalid: "Indica un motivo (3 a 200 caracteres, sin emails)."
+  };
+  const rpcAsCrm = async (name, args) => {
+    const session = getSession();
+    if (!session?.access_token) throw new Error("Inicia sesión en el CRM.");
+    try {
+      return await request(`/rest/v1/rpc/${name}`, {
+        method: "POST",
+        accessToken: session.access_token,
+        body: JSON.stringify(args)
+      });
+    } catch (error) {
+      const known = Object.keys(crmErrorMessages).find((code) => String(error.message).includes(code));
+      throw new Error(known ? crmErrorMessages[known] : "No se pudo completar la operación en Supabase.");
+    }
+  };
+  const eraseContact = (email, reason) => rpcAsCrm("crm_erase_contact", { p_email: email, p_reason: reason });
+  const withdrawCommercialConsent = (leadId) => rpcAsCrm("crm_withdraw_commercial_consent", { p_lead_id: leadId });
+  const retentionPreview = () => rpcAsCrm("retention_preview", {});
+
   window.LegalPreventSupabase = {
     isConfigured,
     createLead,
@@ -369,6 +394,9 @@
     getSession,
     fetchLeads,
     fetchBillingData,
-    saveCrmLead
+    saveCrmLead,
+    eraseContact,
+    withdrawCommercialConsent,
+    retentionPreview
   };
 })();

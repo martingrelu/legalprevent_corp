@@ -21,6 +21,9 @@
    expone.
 8. PR1b (contabilidad del agente: consumo, presupuesto de 25 €/mes con reserva
    atómica y eventos anónimos): `supabase/deploy/PR1b.md`.
+9. PR1c (conservación de 12 meses —desactivada hasta la validación jurídica—,
+   supresión a petición del interesado y retirada del consentimiento
+   comercial desde el CRM): `supabase/deploy/PR1c.md`.
 
 ## 2. Crear usuario para el CRM
 
