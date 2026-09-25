@@ -27,9 +27,9 @@
 10. PR1d (webhook de Stripe `stripe-webhook`: firma con tolerancia de 5 min,
     API 2026-04-22, sin duplicados ni eventos desordenados, 500 si la base
     falla): `supabase/deploy/PR1d.md`.
-11. PR1e (checkout `super-api`: URL de retorno fijas en el servidor, CORS solo
-    para legalprevent.com y límites en la base; retirada de `dynamic-endpoint`
-    y `rapid-api`): `supabase/deploy/PR1e.md`.
+11. PR1e (checkout `super-api` endurecido y después retirado —la web usa la
+    plataforma para contratar—; retirada de `dynamic-endpoint` y `rapid-api`):
+    `supabase/deploy/PR1e.md`.
 
 ## 2. Crear usuario para el CRM
 
@@ -131,9 +131,16 @@ En la configuración de Supabase, deja `Verify JWT with legacy secret` en OFF pa
 - Si falla el alta del lead, la web muestra un aviso al visitante. No se guarda
   ninguna copia de sus datos en el navegador.
 
-## 7. Stripe Checkout
+## 7. Stripe (pagos)
 
-La web está preparada para contratar planes desde la sección de precios mediante Stripe Checkout.
+La contratación **no** se hace en esta web: los botones de precios de
+legalprevent.com llevan a la plataforma (`https://legalprevent.legal/comprar?plan=…`),
+que crea la sesión de Stripe Checkout. La antigua función de checkout de esta
+web (`super-api`) se retiró el 25/09/2026 (ver `supabase/deploy/PR1e.md`).
+
+Este proyecto solo **recibe** los eventos de Stripe de la cuenta (también los de
+las compras hechas en la plataforma) con la función `stripe-webhook` y los guarda
+en `checkout_sessions`, `subscriptions` y `payments` (el CRM los lee).
 
 Para crear solo las tablas de Stripe sin tocar el resto del proyecto, ejecuta en Supabase el archivo:
 
@@ -143,58 +150,25 @@ supabase/stripe-schema.sql
 
 ### Productos en Stripe
 
-Crea estos productos con precio recurrente mensual:
-
 ```text
-Starter  29 €/mes
-Pyme     79 €/mes
-Business 149 €/mes
-Gestorías 199 €/mes
+Starter   29 €/mes   price_1TniT0JnjZc4uuMeb4V5CYEg
+Pyme      79 €/mes   price_1TniToJnjZc4uuMepITJHoEe
+Business 149 €/mes   price_1TniUEJnjZc4uuMe1dLrdHFm
+Gestorías 199 €/mes  price_1TniUqJnjZc4uuMe19EDtrBa
 ```
-
-Stripe generará un ID por cada precio. Tienen formato `price_...`.
 
 ### Secretos en Supabase
 
-Añade estos secretos en `Project Settings` > `Edge Functions` > `Secrets`:
+`stripe-webhook` solo necesita `STRIPE_WEBHOOK_SECRET` (el secreto de firma del
+destino "Legal Prevent Stripe Webhook" en Stripe). `STRIPE_SECRET_KEY` y
+`STRIPE_PRICE_*` eran de la función de checkout retirada y ya no los usa
+ninguna función de este proyecto. No pegues ningún secreto en la web.
+
+### Función `stripe-webhook`
 
 ```text
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PRICE_STARTER=price_1TniT0JnjZc4uuMeb4V5CYEg
-STRIPE_PRICE_PYME=price_1TniToJnjZc4uuMepITJHoEe
-STRIPE_PRICE_BUSINESS=price_1TniUEJnjZc4uuMe1dLrdHFm
-STRIPE_PRICE_GESTORIAS=price_1TniUqJnjZc4uuMe19EDtrBa
-STRIPE_WEBHOOK_SECRET=whsec_...
-PUBLIC_SITE_URL=https://legalprevent.com
-```
-
-No pegues `STRIPE_SECRET_KEY` ni `STRIPE_WEBHOOK_SECRET` en la web.
-
-### Funciones
-
-Hay dos funciones preparadas:
-
-```text
-supabase/functions/create-checkout-session/index.ts
 supabase/functions/stripe-webhook/index.ts
 ```
-
-Nota operativa: si en Supabase la función de checkout se ha desplegado con el nombre `super-api`, la web debe llamar a:
-
-```text
-https://wtpfrlsbfishvworjdtr.supabase.co/functions/v1/super-api
-```
-
-Ese es el endpoint activo configurado actualmente en `supabase-bridge.js`.
-
-Despliegue recomendado:
-
-```bash
-supabase functions deploy create-checkout-session --project-ref wtpfrlsbfishvworjdtr
-supabase functions deploy stripe-webhook --project-ref wtpfrlsbfishvworjdtr
-```
-
-En la función `create-checkout-session`, deja `Verify JWT with legacy secret` en OFF para permitir que la web pública cree sesiones de pago controladas.
 
 En la función `stripe-webhook` deja también la verificación JWT en OFF (Stripe no envía JWT; la autenticación es la firma). Stripe enviará eventos del servidor. Configura el endpoint en Stripe:
 
