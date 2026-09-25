@@ -42,6 +42,7 @@ export const VERIFY_PR1A = `${ROOT}tests/sql/verify_pr1a_migration.sql`;
 export const VERIFY_PR1B = `${ROOT}tests/sql/verify_pr1b_migration.sql`;
 export const VERIFY_PR1C = `${ROOT}tests/sql/verify_pr1c_migration.sql`;
 export const VERIFY_PR1D = `${ROOT}tests/sql/verify_pr1d_migration.sql`;
+export const VERIFY_PR1E = `${ROOT}tests/sql/verify_pr1e_migration.sql`;
 
 // Límites de altas públicas (tabla private.settings de la base migrada).
 export const GENEROUS_LIMITS = { ip_per_hour: null, email_per_day: null, global_per_minute: null, global_per_hour: null };

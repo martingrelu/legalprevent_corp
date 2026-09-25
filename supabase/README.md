@@ -27,6 +27,9 @@
 10. PR1d (webhook de Stripe `stripe-webhook`: firma con tolerancia de 5 min,
     API 2026-04-22, sin duplicados ni eventos desordenados, 500 si la base
     falla): `supabase/deploy/PR1d.md`.
+11. PR1e (checkout `super-api`: URL de retorno fijas en el servidor, CORS solo
+    para legalprevent.com y límites en la base; retirada de `dynamic-endpoint`
+    y `rapid-api`): `supabase/deploy/PR1e.md`.
 
 ## 2. Crear usuario para el CRM
 
