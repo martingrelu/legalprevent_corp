@@ -1,4 +1,4 @@
-import { demoData } from "./demoData.js?v=20260925-1";
+import { demoData } from "./demoData.js?v=20260927-1";
 import {
   CLIENT_STATUSES,
   LEAD_SOURCES,
@@ -11,7 +11,7 @@ import {
   PROPOSAL_STATUSES,
   ROLES,
   TASK_STATUSES,
-} from "./models.js?v=20260925-1";
+} from "./models.js?v=20260927-1";
 
 const STORAGE_KEY = "legalprevent-crm-v1";
 
@@ -419,7 +419,28 @@ export function leadFromSupabaseRow(row, { existingId = "", defaultOwnerId = "",
     commercialConsent: row.commercial_consent === true,
     commercialConsentAt: row.commercial_consent_at || "",
     commercialConsentVersion: row.commercial_consent_version || "",
+    commercialConsentWithdrawnAt: row.commercial_consent_withdrawn_at || "",
     privacyReviewRequired: row.privacy_review_required === true,
+  };
+}
+
+// Quita del estado local un lead suprimido (y cualquier otro lead con el mismo
+// email) junto con lo que cuelga de él. Devuelve un estado nuevo.
+export function removeLeadAndRelated(state, leadId) {
+  const target = state.leads.find((lead) => lead.id === leadId);
+  const email = String(target?.email || "").toLowerCase();
+  const removed = new Set(
+    state.leads.filter((lead) => lead.id === leadId || (email && String(lead.email || "").toLowerCase() === email)).map((lead) => lead.id)
+  );
+  const keep = (item) => !(item.relatedType === "lead" && removed.has(item.relatedId));
+  return {
+    ...state,
+    leads: state.leads.filter((lead) => !removed.has(lead.id)),
+    tasks: (state.tasks || []).filter(keep),
+    interactions: (state.interactions || []).filter(keep),
+    documents: (state.documents || []).filter(keep),
+    notes: (state.notes || []).filter(keep),
+    proposals: (state.proposals || []).filter((proposal) => !removed.has(proposal.relatedLeadId)),
   };
 }
 

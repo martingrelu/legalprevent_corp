@@ -63,6 +63,7 @@ Elimina contenedores y red.
 | `compat.lab.mjs` | Web publicada contra la base de la rama, límite superado con la web antigua y la nueva, web nueva sobre la base sin migrar (orden de despliegue) y rollback con reaplicación. |
 | `crm.lab.mjs` | CRM nuevo y publicado con usuario administrador: sincronización, edición sin alterar consentimiento ni avisos, alta manual; usuario sin rol: sin acceso. |
 | `budget.lab.mjs` | Contabilidad del agente (PR1b): 200 reservas simultáneas sin superar el presupuesto (y prueba de que sin advisory lock se supera), liquidaciones y liberaciones concurrentes al céntimo, alertas únicas, límites por sesión y por día, apagado, permisos y eventos sin datos personales. |
+| `privacy.lab.mjs` | PR1c de extremo a extremo con el CRM real: supresión (leads, diagnósticos y consentimientos, registro sin email), usuario sin rol, retirada del consentimiento, vista previa y ejecución de la conservación, CRM publicado. |
 | `stripe.lab.mjs` | Webhook (service role) sigue escribiendo; `anon` sin acceso; el CRM administrador solo lee. |
 
 Con `--serve` también se pueden ensayar las comprobaciones de despliegue

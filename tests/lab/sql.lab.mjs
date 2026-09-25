@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOT, VERIFY_PR1A, VERIFY_PR1B, psql, psqlFile, reset } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, psql, psqlFile, reset } from "./helpers.mjs";
 
 const PR1A = [
   `${ROOT}supabase/migrations/20260925_crm_admin_policies.sql`,
@@ -186,4 +186,61 @@ test("rollback de PR1b: retira las funciones, conserva los datos y se puede reap
     psql("lab", "delete from private.agent_budget_months where month = date '2026-01-01';");
   }
   assert.equal(verifyPr1b(), "OK: verificación PR1b superada");
+});
+
+// ---------------------------------------------------------------------------
+// PR1c · conservación y supresión
+// ---------------------------------------------------------------------------
+const PR1C = `${ROOT}supabase/migrations/20260927_retention_erasure.sql`;
+const PR1C_ROLLBACK = `${ROOT}supabase/rollback/20260927_retention_erasure_down.sql`;
+const verifyPr1c = () => result("lab", VERIFY_PR1C);
+
+test("la migración de PR1c se puede reaplicar y verify_pr1c_migration.sql supera todos los bloques", () => {
+  psqlFile("lab", PR1C);
+  psqlFile("lab", PR1C);
+  assert.equal(verifyPr1c(), "OK: verificación PR1c superada");
+  assert.equal(verifyPr1b(), "OK: verificación PR1b superada", "PR1c no rompe PR1b");
+  assert.equal(verifyPr1a(), "OK: verificación PR1a superada", "PR1c no rompe PR1a");
+});
+
+test("el verificador de PR1c detecta vulnerabilidades reintroducidas", () => {
+  // Defensa en dos capas: aunque alguien diera permiso de ejecución a anon,
+  // la comprobación interna de administrador sigue impidiendo la supresión.
+  psql("lab", "grant execute on function public.crm_erase_contact(text,text) to anon;");
+  try {
+    assert.equal(verifyPr1c(), "OK: verificación PR1c superada");
+    // Y sin la comprobación interna, ese permiso sí sería una vulnerabilidad.
+    withFunctionMutation("public.crm_erase_contact(text,text)",
+      "if not public.is_crm_admin() then", "if false then", () =>
+        assert.match(verifyPr1c(), /FALLO: anon pudo suprimir contactos/));
+  } finally {
+    psql("lab", "revoke execute on function public.crm_erase_contact(text,text) from anon;");
+  }
+
+  withFunctionMutation("public.crm_erase_contact(text,text)",
+    "if not public.is_crm_admin() then", "if false then", () =>
+      assert.match(verifyPr1c(), /FALLO: un usuario sin rol de administrador pudo suprimir contactos/));
+
+  withFunctionMutation("private.retention_lead_candidates(timestamp with time zone)",
+    "and not l.privacy_review_required", "", () =>
+      assert.match(verifyPr1c(), /FALLO: borró un cliente, un lead en revisión/));
+
+  withFunctionMutation("public.retention_run()",
+    "if v_enabled then", "if true then", () =>
+      assert.match(verifyPr1c(), /FALLO: la conservación desactivada borró datos/));
+
+  assert.equal(verifyPr1c(), "OK: verificación PR1c superada");
+});
+
+test("rollback de PR1c: retira las funciones, conserva registros y se puede reaplicar", () => {
+  psql("lab", "insert into private.erasure_log (email_hash, reason, leads_deleted, diagnostics_deleted) values ('hash-prueba', 'prueba rollback', 1, 0);");
+  try {
+    psqlFile("lab", PR1C_ROLLBACK);
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname in ('crm_erase_contact','retention_run','retention_preview','crm_withdraw_commercial_consent')"), "0");
+    assert.equal(psql("lab", "select count(*) from private.erasure_log where email_hash = 'hash-prueba'"), "1");
+  } finally {
+    psqlFile("lab", PR1C);
+    psql("lab", "delete from private.erasure_log where email_hash = 'hash-prueba';");
+  }
+  assert.equal(verifyPr1c(), "OK: verificación PR1c superada");
 });

@@ -234,3 +234,32 @@ test("límite superado: informa rate_limited, no pide aviso y no guarda nada en 
   assert.equal(calls.some((call) => call.url.endsWith("/smooth-action")), false);
   assert.deepEqual(localStorage.writes, []);
 });
+
+function loadCrmBridge(responder) {
+  const calls = [];
+  const sessionStorage = createStorage({ lp_supabase_session: JSON.stringify({ access_token: "token-crm" }) });
+  const window = { LEGAL_PREVENT_SUPABASE: { url: "https://proyecto.supabase.co", anonKey: "anon" }, location: { href: "https://legalprevent.com/crm/" } };
+  const context = vm.createContext({
+    window, localStorage: createStorage(), sessionStorage, console: { warn() {} }, JSON, Date, Math, Number, String, Boolean,
+    fetch: async (url, init = {}) => { calls.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body || "{}") }); return responder(String(url)); },
+  });
+  vm.runInContext(bridgeSource, context);
+  return { api: window.LegalPreventSupabase, calls };
+}
+
+test("CRM: supresión y retirada del consentimiento usan la sesión del CRM", async () => {
+  const { api, calls } = loadCrmBridge(() => new Response(JSON.stringify({ leads_deleted: 1, diagnostics_deleted: 0 }), { status: 200 }));
+  await api.eraseContact("ana@empresa.es", "Solicitud del interesado");
+  await api.withdrawCommercialConsent(LEAD_ID);
+  assert.ok(calls[0].url.endsWith("/rpc/crm_erase_contact"));
+  assert.deepEqual(calls[0].body, { p_email: "ana@empresa.es", p_reason: "Solicitud del interesado" });
+  assert.equal(calls[0].headers.Authorization, "Bearer token-crm");
+  assert.deepEqual(calls[1].body, { p_lead_id: LEAD_ID });
+});
+
+test("CRM: los errores del servidor se traducen sin mostrar detalles internos", async () => {
+  const { api } = loadCrmBridge(() => new Response(JSON.stringify({ code: "42501", message: "not_allowed" }), { status: 403 }));
+  await assert.rejects(api.eraseContact("ana@empresa.es", "motivo"), /no tiene permiso de administrador/);
+  const other = loadCrmBridge(() => new Response('{"message":"detalle interno"}', { status: 500 }));
+  await assert.rejects(other.api.retentionPreview(), (error) => !/detalle interno/.test(error.message));
+});

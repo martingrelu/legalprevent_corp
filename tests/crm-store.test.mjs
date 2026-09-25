@@ -1,7 +1,7 @@
 // CRM: conversión de filas de Supabase, filtros y métricas (PR1a).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dashboardMetrics, filteredLeads, leadFromSupabaseRow } from "../crm/src/store.js?v=20260925-1";
+import { dashboardMetrics, filteredLeads, leadFromSupabaseRow, removeLeadAndRelated } from "../crm/src/store.js?v=20260927-1";
 
 const row = (extra = {}) => ({
   id: "3f2b9c1e-8a4d-4f6b-9c2e-1a2b3c4d5e6f",
@@ -68,4 +68,33 @@ test("métrica de demos solicitadas desde la web y aún sin atender", () => {
 test("sin columnas de consentimiento en la base (antes de migrar) no se muestran datos de consentimiento", () => {
   assert.equal(leadFromSupabaseRow(row()).consentTracked, false);
   assert.equal(leadFromSupabaseRow(row({ privacy_accepted_at: null })).consentTracked, true);
+});
+
+test("retirada del consentimiento comercial: se lleva al CRM con su fecha", () => {
+  const lead = leadFromSupabaseRow(row({ commercial_consent: false, commercial_consent_withdrawn_at: "2026-09-27T10:00:00Z" }));
+  assert.equal(lead.commercialConsent, false);
+  assert.equal(lead.commercialConsentWithdrawnAt, "2026-09-27T10:00:00Z");
+});
+
+test("supresión local: quita el lead, los demás con el mismo email y lo que cuelga de ellos", () => {
+  const state = {
+    leads: [
+      { id: "a", email: "Ana@Empresa.es" },
+      { id: "b", email: "ana@empresa.es" },
+      { id: "c", email: "otro@empresa.es" },
+    ],
+    tasks: [{ id: "t1", relatedType: "lead", relatedId: "a" }, { id: "t2", relatedType: "lead", relatedId: "c" }, { id: "t3", relatedType: "client", relatedId: "a" }],
+    interactions: [{ id: "i1", relatedType: "lead", relatedId: "b" }],
+    documents: [],
+    notes: [{ id: "n1", relatedType: "lead", relatedId: "a" }],
+    proposals: [{ id: "p1", relatedLeadId: "b" }, { id: "p2", relatedLeadId: "c" }],
+    clients: [],
+  };
+  const next = removeLeadAndRelated(state, "a");
+  assert.deepEqual(next.leads.map((l) => l.id), ["c"]);
+  assert.deepEqual(next.tasks.map((t) => t.id), ["t2", "t3"]);
+  assert.deepEqual(next.interactions, []);
+  assert.deepEqual(next.notes, []);
+  assert.deepEqual(next.proposals.map((p) => p.id), ["p2"]);
+  assert.equal(state.leads.length, 3, "no modifica el estado original");
 });
