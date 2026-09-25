@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, psql, psqlFile, reset } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, VERIFY_PR1E, psql, psqlFile, reset } from "./helpers.mjs";
 
 const PR1A = [
   `${ROOT}supabase/migrations/20260925_crm_admin_policies.sql`,
@@ -293,4 +293,45 @@ test("rollback de PR1d: retira la función, conserva el registro de eventos y se
     psql("lab", "delete from private.stripe_events where event_id = 'evt_rollback';");
   }
   assert.equal(verifyPr1d(), "OK: verificación PR1d superada");
+});
+
+// ---------------------------------------------------------------------------
+// PR1e · límites del checkout
+// ---------------------------------------------------------------------------
+const PR1E = `${ROOT}supabase/migrations/20260929_checkout_limits.sql`;
+const PR1E_ROLLBACK = `${ROOT}supabase/rollback/20260929_checkout_limits_down.sql`;
+const verifyPr1e = () => result("lab", VERIFY_PR1E);
+
+test("la migración de PR1e se puede reaplicar y verify_pr1e_migration.sql supera todos los bloques", () => {
+  psqlFile("lab", PR1E);
+  psqlFile("lab", PR1E);
+  assert.equal(verifyPr1e(), "OK: verificación PR1e superada");
+  assert.equal(verifyPr1a(), "OK: verificación PR1a superada", "PR1e no rompe PR1a (contadores compartidos)");
+});
+
+test("el verificador de PR1e detecta vulnerabilidades y errores reintroducidos", () => {
+  psql("lab", "grant execute on function public.checkout_allow(text) to anon;");
+  try {
+    assert.match(verifyPr1e(), /FALLO: anon pudo usar checkout_allow/);
+  } finally {
+    psql("lab", "revoke execute on function public.checkout_allow(text) from anon;");
+  }
+  withFunctionMutation("public.checkout_allow(text)",
+    "(v_limits ->> 'global_per_minute')::integer", "null", () =>
+      assert.match(verifyPr1e(), /FALLO: el límite global dejó pasar 5 de 5/));
+  withFunctionMutation("public.checkout_allow(text)",
+    "'checkout:email:' || private.salted_hash(p_email)", "'checkout:email:' || lower(p_email)", () =>
+      assert.match(verifyPr1e(), /FALLO: el contador guarda el email en claro/));
+  assert.equal(verifyPr1e(), "OK: verificación PR1e superada");
+});
+
+test("rollback de PR1e: retira la función y se puede reaplicar", () => {
+  try {
+    psqlFile("lab", PR1E_ROLLBACK);
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname = 'checkout_allow'"), "0");
+    assert.notEqual(psql("lab", "select value from private.settings where key = 'checkout_limits'"), "");
+  } finally {
+    psqlFile("lab", PR1E);
+  }
+  assert.equal(verifyPr1e(), "OK: verificación PR1e superada");
 });
