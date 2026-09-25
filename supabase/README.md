@@ -19,6 +19,8 @@
    permisos mínimos): `supabase/deploy/PR1a.md`. La configuración operativa
    (límites, cabecera de IP) está en la tabla `private.settings`, que la API no
    expone.
+8. PR1b (contabilidad del agente: consumo, presupuesto de 25 €/mes con reserva
+   atómica y eventos anónimos): `supabase/deploy/PR1b.md`.
 
 ## 2. Crear usuario para el CRM
 

@@ -1,10 +1,10 @@
 // Migraciones, verificadores SQL, mutaciones de seguridad y permisos efectivos.
-//   lab_old = producción actual (PR0 desplegado)
-//   lab     = producción + migraciones de la rama (PR1a)
+//   lab_old = producción actual (origin/main: PR0 y PR1a desplegados)
+//   lab     = producción + migraciones de la rama
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOT, VERIFY, VERIFY_PR1A, psql, psqlFile, reset } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, VERIFY_PR1B, psql, psqlFile, reset } from "./helpers.mjs";
 
 const PR1A = [
   `${ROOT}supabase/migrations/20260925_crm_admin_policies.sql`,
@@ -35,8 +35,11 @@ function withFunctionMutation(signature, from, to, fn) {
   }
 }
 
-test("verify_pr0_migration.sql sigue pasando en la réplica de producción", () => {
-  assert.equal(result("lab_old", VERIFY), "OK: verificación PR0 superada");
+// verify_pr0_migration.sql es histórico: su bloque 10 comprueba la
+// compatibilidad temporal que PR1a retiró. Producción se verifica ahora con el
+// verificador de PR1a.
+test("la réplica de producción supera verify_pr1a_migration.sql", () => {
+  assert.equal(result("lab_old", VERIFY_PR1A), "OK: verificación PR1a superada");
 });
 
 test("las migraciones de PR1a se pueden reaplicar (idempotentes)", async () => {
@@ -133,6 +136,54 @@ test("pr0-snapshot.sql y pr1-inventory.sql se ejecutan en la réplica de producc
   const snapshot = psqlFile("lab_old", `${ROOT}supabase/deploy/pr0-snapshot.sql`);
   assert.match(snapshot, /postgres miembro de anon\|true/);
   const inventory = psqlFile("lab_old", `${ROOT}supabase/deploy/pr1-inventory.sql`);
-  assert.match(inventory, /tabla payments\|rls=true anon=S,I,U,D/);
+  assert.match(inventory, /tabla payments\|rls=true anon=- auth=S /);
   assert.equal(psql("lab_old", "select md5(coalesce(string_agg(t::text, ','), '')) from (select * from public.leads order by id) t"), before);
+});
+
+// ---------------------------------------------------------------------------
+// PR1b · contabilidad del agente
+// ---------------------------------------------------------------------------
+const PR1B = `${ROOT}supabase/migrations/20260926_agent_budget.sql`;
+const PR1B_ROLLBACK = `${ROOT}supabase/rollback/20260926_agent_budget_down.sql`;
+const verifyPr1b = () => result("lab", VERIFY_PR1B);
+
+test("la migración de PR1b se puede reaplicar y verify_pr1b_migration.sql supera todos los bloques", () => {
+  psqlFile("lab", PR1B);
+  psqlFile("lab", PR1B);
+  assert.equal(verifyPr1b(), "OK: verificación PR1b superada");
+  assert.equal(verifyPr1a(), "OK: verificación PR1a superada", "PR1b no rompe PR1a");
+});
+
+test("el verificador de PR1b detecta vulnerabilidades reintroducidas", () => {
+  psql("lab", "grant execute on function public.agent_reserve(text,integer,integer) to anon;");
+  try {
+    assert.match(verifyPr1b(), /FALLO: anon pudo reservar presupuesto/);
+  } finally {
+    psql("lab", "revoke execute on function public.agent_reserve(text,integer,integer) from anon;");
+  }
+
+  withFunctionMutation("public.agent_reserve(text,integer,integer)",
+    "v_row.spent_eur + v_row.reserved_eur + v_estimate > v_budget",
+    "v_row.spent_eur + v_row.reserved_eur + v_estimate > v_budget * 100", () =>
+      assert.match(verifyPr1b(), /FALLO: reservó por encima del presupuesto/));
+
+  withFunctionMutation("public.agent_track_event(jsonb)",
+    "(p_event ->> v_field) !~ '^[a-z0-9_-]{1,40}$'",
+    "false", () =>
+      assert.match(verifyPr1b(), /FALLO: aceptó un email en un evento/));
+
+  assert.equal(verifyPr1b(), "OK: verificación PR1b superada");
+});
+
+test("rollback de PR1b: retira las funciones, conserva los datos y se puede reaplicar", () => {
+  psql("lab", "insert into private.agent_budget_months (month, spent_eur) values (date '2026-01-01', 1.5) on conflict do nothing;");
+  try {
+    psqlFile("lab", PR1B_ROLLBACK);
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname like 'agent\\_%' and pronamespace = 'public'::regnamespace"), "0");
+    assert.equal(psql("lab", "select spent_eur from private.agent_budget_months where month = date '2026-01-01'"), "1.500000");
+  } finally {
+    psqlFile("lab", PR1B);
+    psql("lab", "delete from private.agent_budget_months where month = date '2026-01-01';");
+  }
+  assert.equal(verifyPr1b(), "OK: verificación PR1b superada");
 });
