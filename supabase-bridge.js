@@ -359,6 +359,25 @@
   const withdrawCommercialConsent = (leadId) => rpcAsCrm("crm_withdraw_commercial_consent", { p_lead_id: leadId });
   const retentionPreview = () => rpcAsCrm("retention_preview", {});
 
+  // Laboratorio privado del agente comercial (PR2). Solo administradores del
+  // CRM: la función comprueba el rol con el JWT de la sesión.
+  const agentLabSend = async ({ model, message, state = null, caseId = null }) => {
+    const session = getSession();
+    if (!session?.access_token) throw new Error("Inicia sesión en el CRM.");
+    const response = await fetch(`${cleanBaseUrl()}/functions/v1/sales-agent`, {
+      method: "POST",
+      headers: headers(session.access_token),
+      body: JSON.stringify({ model, message, state, case_id: caseId })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `El agente respondió con estado ${response.status}.`);
+    return result;
+  };
+  const agentLabTurns = (conversationId = null, limit = 300) =>
+    rpcAsCrm("agent_lab_turns", { p_conversation_id: conversationId, p_limit: limit });
+  const agentLabRate = (id, rating, comment) => rpcAsCrm("agent_lab_rate", { p_id: id, p_rating: rating, p_comment: comment || "" });
+  const agentLabSummary = () => rpcAsCrm("agent_lab_summary", {});
+
   window.LegalPreventSupabase = {
     isConfigured,
     createLead,
@@ -373,6 +392,10 @@
     saveCrmLead,
     eraseContact,
     withdrawCommercialConsent,
-    retentionPreview
+    retentionPreview,
+    agentLabSend,
+    agentLabTurns,
+    agentLabRate,
+    agentLabSummary
   };
 })();
