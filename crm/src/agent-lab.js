@@ -96,6 +96,10 @@ function renderMessage(message) {
   if (message.role === "user") return `<div class="agent-msg user"><p>${esc(message.text)}</p></div>`;
   const d = message.debug || {};
   const validation = d.filters?.validation?.length ? ` · filtros: ${esc(d.filters.validation.join(", "))}` : "";
+  const pe = d.filters?.provider_error;
+  const providerError = pe
+    ? `<small class="agent-debug agent-provider-error">Error del proveedor: HTTP ${esc(pe.status)}${pe.code ? ` · código ${esc(pe.code)}` : ""}${pe.type ? ` · tipo ${esc(pe.type)}` : ""}${pe.content_type ? ` · ${esc(pe.content_type)}` : ""}${pe.request_id ? ` · petición ${esc(pe.request_id)}` : ""}${pe.message ? `<br>«${esc(pe.message)}»` : ""}</small>`
+    : "";
   return `
     <div class="agent-msg assistant">
       <p>${esc(message.text)}</p>
@@ -103,6 +107,7 @@ function renderMessage(message) {
       <small class="agent-debug">${esc(d.model)} · ${esc(d.provider)} · intención ${esc(message.intent)} ·
         ${d.fallback_reason ? `<strong>fallback: ${esc(d.fallback_reason)}</strong>` : "respuesta del modelo"} ·
         tokens ${d.usage ? `${d.usage.input}/${d.usage.cached}/${d.usage.output}` : "0"} · ${euros(d.cost_eur)} · ${esc(d.latency_ms)} ms${validation}</small>
+      ${providerError}
     </div>`;
 }
 
@@ -139,7 +144,7 @@ function renderTurns() {
   if (!lab.turns.length) return `<p class="muted">Sin turnos todavía.</p>`;
   return `<div class="agent-lab-turns">${lab.turns.slice(0, 60).map((t) => `
     <form class="agent-turn" data-lab="rate" data-id="${esc(t.id)}">
-      <p><small>${esc(t.model)} · ${esc(t.case_id || "libre")} · turno ${esc(t.turn)} ${t.fallback_reason ? `· fallback ${esc(t.fallback_reason)}` : ""}</small></p>
+      <p><small>${esc(t.model)} · ${esc(t.case_id || "libre")} · turno ${esc(t.turn)} ${t.fallback_reason ? `· fallback ${esc(t.fallback_reason)}` : ""}${t.filters?.provider_error ? ` · HTTP ${esc(t.filters.provider_error.status)}${t.filters.provider_error.message ? ` «${esc(t.filters.provider_error.message)}»` : ""}` : ""}</small></p>
       <p><strong>Visitante:</strong> ${esc(t.user_text)}</p>
       <p><strong>Agente:</strong> ${esc(t.reply)}</p>
       <div class="agent-rating">

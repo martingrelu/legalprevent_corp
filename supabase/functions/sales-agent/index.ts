@@ -179,7 +179,8 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
   if (!fallbackReason && regionBlocked) fallback("region_unavailable");
   if (!fallbackReason && provider === notEnabledProvider) fallback("provider_not_enabled");
   const providerFailure = (error: unknown): FallbackReason => {
-    if (error instanceof ProviderHttpError) filters.provider_error = { status: error.status, code: error.code };
+    // Diagnóstico saneado (solo existe el modo privado en PR2; ver sanitizeProviderText).
+    if (error instanceof ProviderHttpError) filters.provider_error = error.info;
     return error instanceof ProviderNotEnabled ? "provider_not_enabled" : "provider_error";
   };
 

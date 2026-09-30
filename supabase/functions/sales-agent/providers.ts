@@ -26,14 +26,48 @@ export type ModelProvider = {
 };
 
 export class ProviderNotEnabled extends Error {}
-// Error HTTP del proveedor: solo estado y código (nunca el cuerpo completo).
+
+// Saneamiento de textos devueltos por el proveedor (diagnóstico del modo
+// privado): nunca claves, tokens, cabeceras Authorization, JWT, emails ni
+// identificadores largos; sin HTML ni caracteres de control; longitud acotada.
+export const PROVIDER_MESSAGE_MAX = 240;
+export function sanitizeProviderText(raw: unknown, max = PROVIDER_MESSAGE_MAX): string | null {
+  if (raw === null || raw === undefined) return null;
+  let text = String(raw).slice(0, 8000);
+  text = text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ");
+  text = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ");
+  text = text
+    .replace(/\bauthorization\b\s*[:=]\s*\S+(\s+\S+)?/gi, "authorization: [oculto]")
+    .replace(/\bbearer\s+\S+/gi, "Bearer [oculto]")
+    .replace(/\bsk-[A-Za-z0-9_*.\-]{2,}/g, "sk-[oculto]")
+    .replace(/\beyJ[A-Za-z0-9_-]{6,}(?:\.[A-Za-z0-9_-]*){0,2}/g, "[jwt oculto]")
+    .replace(/\b(org|proj|user|sess|key|req)[-_][A-Za-z0-9]{6,}\b/g, "$1-[oculto]")
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]")
+    .replace(/[A-Za-z0-9+/_=-]{32,}/g, "[oculto]")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+// Error HTTP del proveedor con diagnóstico saneado (solo modo privado).
+export type ProviderErrorInfo = {
+  status: number;
+  code: string | null;
+  type: string | null;
+  message: string | null;
+  request_id: string | null;
+  content_type: string | null;
+};
 export class ProviderHttpError extends Error {
   status: number;
   code: string | null;
-  constructor(status: number, code: string | null) {
-    super(`provider_http_${status}`);
-    this.status = status;
-    this.code = code;
+  info: ProviderErrorInfo;
+  constructor(info: ProviderErrorInfo) {
+    super(`provider_http_${info.status}`);
+    this.status = info.status;
+    this.code = info.code;
+    this.info = info;
   }
 }
 
@@ -64,15 +98,34 @@ export type OpenAIOptions = {
   schema: Record<string, unknown>;
 };
 
-async function openaiError(response: Response) {
-  let code: string | null = null;
+const shortField = (value: unknown) =>
+  typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(value) ? value : null;
+
+// Lee el error como texto (puede no ser JSON: p. ej. una pasarela regional) y
+// extrae solo campos saneados. Las cabeceras de la PETICIÓN (Authorization)
+// nunca se tocan aquí; de la respuesta solo se usan x-request-id y content-type.
+export async function openaiError(response: Response) {
+  let raw = "";
   try {
-    const body = await response.json();
-    code = typeof body?.error?.code === "string" ? body.error.code : typeof body?.error?.type === "string" ? body.error.type : null;
+    raw = (await response.text()).slice(0, 8000);
   } catch {
-    code = null;
+    raw = "";
   }
-  return new ProviderHttpError(response.status, code);
+  let body: { error?: { message?: unknown; code?: unknown; type?: unknown } } | null = null;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    body = null;
+  }
+  const error = body && typeof body === "object" ? body.error : undefined;
+  return new ProviderHttpError({
+    status: response.status,
+    code: shortField(error?.code),
+    type: shortField(error?.type),
+    message: sanitizeProviderText(error && typeof error === "object" ? error.message : raw),
+    request_id: shortField(response.headers.get("x-request-id")),
+    content_type: sanitizeProviderText((response.headers.get("content-type") || "").split(";")[0], 60),
+  });
 }
 
 export function openaiProvider(options: OpenAIOptions): ModelProvider {
