@@ -1,7 +1,7 @@
 // Contabilidad del agente (PR1b) con peticiones concurrentes reales a través
 // de PostgREST (pool de conexiones independientes), como las hará la Edge
 // Function del agente con la service role.
-import { test, beforeEach } from "node:test";
+import { test, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { ANON, AUTHENTICATED, AUTHENTICATED_NO_ADMIN } from "./jwt.mjs";
 import { psql, rpc, service, tally } from "./helpers.mjs";
@@ -26,6 +26,14 @@ const month = () => psql("lab", "select spent_eur || '|' || reserved_eur from pr
 const session = (i) => `lab-sesion-${String(i).padStart(6, "0")}`;
 const reserve = (s, input = 10000, output = 0) =>
   service("agent_reserve", { p_session_id: s, p_max_input_tokens: input, p_max_output_tokens: output });
+
+// Al terminar se restauran los valores de la migración de PR1b (los comprueban
+// los verificadores posteriores).
+after(() => configure({
+  enabled: true, monthly_budget_eur: 25, alert_thresholds_pct: [50, 80, 100],
+  price_input_eur_per_mtok: 0.37, price_output_eur_per_mtok: 1.48,
+  max_messages_per_session: 12, max_calls_per_day: 600, reservation_ttl_minutes: 10,
+}));
 
 beforeEach(() => {
   psql("lab", `delete from private.agent_usage; delete from private.agent_reservations;

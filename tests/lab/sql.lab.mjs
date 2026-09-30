@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, VERIFY_PR1E, psql, psqlFile, reset } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, VERIFY_PR1E, VERIFY_PR2, psql, psqlFile, reset } from "./helpers.mjs";
 
 const PR1A = [
   `${ROOT}supabase/migrations/20260925_crm_admin_policies.sql`,
@@ -179,7 +179,7 @@ test("rollback de PR1b: retira las funciones, conserva los datos y se puede reap
   psql("lab", "insert into private.agent_budget_months (month, spent_eur) values (date '2026-01-01', 1.5) on conflict do nothing;");
   try {
     psqlFile("lab", PR1B_ROLLBACK);
-    assert.equal(psql("lab", "select count(*) from pg_proc where proname like 'agent\\_%' and pronamespace = 'public'::regnamespace"), "0");
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname in ('agent_reserve','agent_settle','agent_release','agent_track_event','agent_metrics') and pronamespace = 'public'::regnamespace"), "0");
     assert.equal(psql("lab", "select spent_eur from private.agent_budget_months where month = date '2026-01-01'"), "1.500000");
   } finally {
     psqlFile("lab", PR1B);
@@ -334,4 +334,57 @@ test("rollback de PR1e: retira la función y se puede reaplicar", () => {
     psqlFile("lab", PR1E);
   }
   assert.equal(verifyPr1e(), "OK: verificación PR1e superada");
+});
+
+// ---------------------------------------------------------------------------
+// PR2 · laboratorio privado del agente
+// ---------------------------------------------------------------------------
+const PR2 = `${ROOT}supabase/migrations/20261001_agent_private_lab.sql`;
+const PR2_ROLLBACK = `${ROOT}supabase/rollback/20261001_agent_private_lab_down.sql`;
+const verifyPr2 = () => result("lab", VERIFY_PR2);
+
+test("la migración de PR2 se puede reaplicar y verify_pr2_migration.sql supera todos los bloques", () => {
+  psqlFile("lab", PR2);
+  psqlFile("lab", PR2);
+  assert.equal(verifyPr2(), "OK: verificación PR2 superada");
+  assert.equal(verifyPr1b(), "OK: verificación PR1b superada", "PR2 no rompe el presupuesto público de PR1b");
+  assert.equal(verifyPr1a(), "OK: verificación PR1a superada");
+});
+
+test("el verificador de PR2 detecta vulnerabilidades y errores reintroducidos", () => {
+  psql("lab", "grant execute on function public.agent_preview_reserve(text,text,integer,integer,text) to anon;");
+  try {
+    assert.match(verifyPr2(), /FALLO: anon pudo reservar presupuesto de pruebas/);
+  } finally {
+    psql("lab", "revoke execute on function public.agent_preview_reserve(text,text,integer,integer,text) from anon;");
+  }
+  withFunctionMutation("public.agent_preview_reserve(text,text,integer,integer,text)",
+    "if v_committed + v_estimate > coalesce((v_config ->> 'preview_budget_eur')::numeric, 0) then",
+    "if false then", () =>
+      assert.match(verifyPr2(), /FALLO: superó el presupuesto de pruebas/));
+  withFunctionMutation("public.agent_preview_reserve(text,text,integer,integer,text)",
+    "if (v_config ->> 'real_call_allowance')::integer <= 0 then",
+    "if false then", () =>
+      assert.match(verifyPr2(), /FALLO: (sin cupo se permitió una llamada real|se permitió una segunda llamada real)/));
+  withFunctionMutation("public.agent_lab_summary()",
+    "if not public.is_crm_admin() then", "if false then", () =>
+      assert.match(verifyPr2(), /FALLO: un usuario sin rol de administrador vio el laboratorio/));
+  withFunctionMutation("public.agent_preview_log_turn(jsonb)",
+    "delete from private.agent_test_transcripts where expires_at < now();\n  return v_id;",
+    "return v_id;", () =>
+      assert.match(verifyPr2(), /FALLO: no purgó las conversaciones caducadas/));
+  assert.equal(verifyPr2(), "OK: verificación PR2 superada");
+});
+
+test("rollback de PR2: retira funciones, conserva el libro de gasto y se puede reaplicar", () => {
+  psql("lab", "insert into private.agent_preview_ledger (conversation_id, model, reserved_eur, spent_eur, status) values ('rollback-pr2-000000001', 'gpt-6-luna', 0.001, 0.001, 'settled');");
+  try {
+    psqlFile("lab", PR2_ROLLBACK);
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname like 'agent_preview_%' or proname like 'agent_lab_%'"), "0");
+    assert.equal(psql("lab", "select count(*) from private.agent_preview_ledger where conversation_id = 'rollback-pr2-000000001'"), "1");
+  } finally {
+    psqlFile("lab", PR2);
+    psql("lab", "delete from private.agent_preview_ledger where conversation_id = 'rollback-pr2-000000001';");
+  }
+  assert.equal(verifyPr2(), "OK: verificación PR2 superada");
 });

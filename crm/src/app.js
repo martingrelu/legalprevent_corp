@@ -11,7 +11,8 @@ import {
   ROLES,
   TASK_STATUSES,
   SCHEMA,
-} from "./models.js?v=20260927-1";
+} from "./models.js?v=20261001-1";
+import { handleAgentLabEvent, mountAgentLab, renderAgentLab } from "./agent-lab.js?v=20261001-1";
 import {
   addInteraction,
   applyAutomations,
@@ -48,8 +49,8 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20260927-1";
-import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20260927-1";
+} from "./store.js?v=20261001-1";
+import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261001-1";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();
@@ -72,6 +73,16 @@ window.addEventListener("hashchange", () => {
   view = parseRoute();
   render();
 });
+
+// Laboratorio privado del agente (PR2): sus eventos se atienden en su módulo.
+for (const type of ["submit", "click", "change"]) {
+  document.addEventListener(type, (event) => {
+    if (view.name !== "agente" || !event.target.closest?.("[data-lab]")) return;
+    if (type === "submit") event.preventDefault();
+    event.stopPropagation();
+    handleAgentLabEvent(event, render);
+  }, true);
+}
 
 document.addEventListener("submit", handleSubmit);
 document.addEventListener("click", handleClick);
@@ -114,6 +125,7 @@ function render() {
     <div id="modal-root"></div>
     <div id="toast" class="toast" role="status"></div>
   `;
+  if (view.name === "agente" && canAccess(state, "settings")) mountAgentLab(app.querySelector("[data-agent-lab]"), render);
 }
 
 function hasCrmAccess() {
@@ -157,6 +169,7 @@ function renderSidebar(user) {
     ["tasks", "Tareas", "tasks"],
     ["proposals", "Propuestas", "proposals"],
     ["settings", "Modelo y permisos", "settings"],
+    ["agente", "Agente IA (privado)", "settings"],
   ];
 
   return `
@@ -239,6 +252,7 @@ function renderView() {
     tasks: "tasks",
     proposals: "proposals",
     settings: "settings",
+    agente: "settings",
   };
   const permission = permissionByView[view.name] || "dashboard";
   if (!canAccess(state, permission)) {
@@ -254,6 +268,7 @@ function renderView() {
   if (view.name === "tasks") return renderTasks();
   if (view.name === "proposals") return renderProposals();
   if (view.name === "settings") return renderSettings();
+  if (view.name === "agente") return renderAgentLab();
   return renderDashboard();
 }
 
@@ -2129,6 +2144,7 @@ function labelForView(name) {
     tasks: "Tareas comerciales",
     proposals: "Propuestas comerciales",
     settings: "Configuracion CRM",
+    agente: "Laboratorio del agente IA",
   };
   return labels[name] || "Dashboard CRM";
 }
