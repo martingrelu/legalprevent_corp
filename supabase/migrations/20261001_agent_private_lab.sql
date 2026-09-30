@@ -2,8 +2,13 @@
 --
 -- 1. Configuración del agente ampliada (sin tocar el presupuesto público de
 --    PR1b): modo público APAGADO, modo privado, modelos candidatos con precio
---    propio (USD por millón de tokens, incluida la entrada en caché), región UE
---    y límites de entrada/salida.
+--    propio (USD por millón de tokens, incluida la entrada en caché), versión
+--    de modelo que se pide a la API (api_model), región UE y límites de
+--    entrada/salida. real_call_allowance: cupo de mensajes con proveedor REAL
+--    (0 = ninguno, null = sin cupo); se descuenta atómicamente en cada reserva
+--    y se concede expresamente para cada prueba. models.<m>.eu = true solo cuando OpenAI confirme la UE
+--    para NUESTRA organización (los tres modelos son elegibles según su
+--    documentación de 30/09/2026, pero la UE exige aprobar MAM o ZDR).
 -- 2. Presupuesto de pruebas SEPARADO (5 € en total, no mensual) con reserva
 --    previa y liquidación, serializado con un advisory lock propio. No consume
 --    el presupuesto público de 25 €/mes.
@@ -32,10 +37,11 @@ update private.settings
       "region": "eu",
       "usd_eur": 0.90,
       "default_model": null,
+      "real_call_allowance": 0,
       "models": {
-        "gpt-5.4-mini": {"in": 0.75, "cached_in": 0.075, "out": 4.50, "eu": null},
-        "gpt-5.6-luna": {"in": 0.20, "cached_in": 0.02, "out": 1.20, "eu": null},
-        "gpt-6-luna": {"in": 0.10, "cached_in": 0.01, "out": 0.50, "eu": null}
+        "gpt-5.4-mini": {"in": 0.75, "cached_in": 0.075, "out": 4.50, "eu": null, "api_model": "gpt-5.4-mini-2026-03-17"},
+        "gpt-5.6-luna": {"in": 0.20, "cached_in": 0.02, "out": 1.20, "eu": null, "api_model": "gpt-5.6-luna"},
+        "gpt-6-luna": {"in": 0.10, "cached_in": 0.01, "out": 0.50, "eu": null, "api_model": "gpt-6-luna"}
       }
     }'::jsonb || value,
        description = 'Agente comercial. public_enabled=false hasta validación jurídica. Presupuesto público mensual (monthly_budget_eur) y de pruebas total (preview_budget_eur) separados. Precios de models en USD/Mtok (30/09/2026). enabled=false o presupuesto agotado → respuestas fijas sin IA.',
@@ -144,12 +150,15 @@ as $$
 $$;
 
 -- Reserva el coste máximo de una llamada de prueba. status:
---   reserved | disabled | model_invalid | rate_limited | budget_exhausted
+--   reserved | disabled | model_invalid | rate_limited | budget_exhausted | allowance_exhausted
+-- p_provider = 'openai' consume una unidad de real_call_allowance (si no es null).
+drop function if exists public.agent_preview_reserve(text, text, integer, integer);
 create or replace function public.agent_preview_reserve(
   p_conversation_id text,
   p_model text,
   p_max_input_tokens integer,
-  p_max_output_tokens integer
+  p_max_output_tokens integer,
+  p_provider text default 'simulated'
 )
 returns jsonb
 language plpgsql
@@ -186,11 +195,25 @@ begin
     return jsonb_build_object('status', 'rate_limited');
   end if;
 
+  -- Cupo de llamadas REALES: sin cupo no se contacta con el proveedor.
+  if p_provider = 'openai' and jsonb_typeof(v_config -> 'real_call_allowance') = 'number' then
+    if (v_config ->> 'real_call_allowance')::integer <= 0 then
+      return jsonb_build_object('status', 'allowance_exhausted');
+    end if;
+  end if;
+
   v_estimate := private.agent_model_cost(p_model, p_max_input_tokens, 0, p_max_output_tokens, v_config);
   select coalesce(sum(case when status = 'settled' then spent_eur when status = 'reserved' then reserved_eur else 0 end), 0)
     into v_committed from private.agent_preview_ledger;
   if v_committed + v_estimate > coalesce((v_config ->> 'preview_budget_eur')::numeric, 0) then
     return jsonb_build_object('status', 'budget_exhausted');
+  end if;
+
+  if p_provider = 'openai' and jsonb_typeof(v_config -> 'real_call_allowance') = 'number' then
+    update private.settings
+       set value = jsonb_set(value, '{real_call_allowance}', to_jsonb((v_config ->> 'real_call_allowance')::integer - 1)),
+           updated_at = now()
+     where key = 'agent';
   end if;
 
   insert into private.agent_preview_ledger (conversation_id, model, reserved_eur)
@@ -427,7 +450,7 @@ $$;
 -- 6. Permisos
 -- ---------------------------------------------------------------------------
 revoke all on function public.agent_runtime_config() from public, anon, authenticated;
-revoke all on function public.agent_preview_reserve(text, text, integer, integer) from public, anon, authenticated;
+revoke all on function public.agent_preview_reserve(text, text, integer, integer, text) from public, anon, authenticated;
 revoke all on function public.agent_preview_settle(uuid, integer, integer, integer) from public, anon, authenticated;
 revoke all on function public.agent_preview_release(uuid) from public, anon, authenticated;
 revoke all on function public.agent_preview_log_turn(jsonb) from public, anon, authenticated;
@@ -438,7 +461,7 @@ revoke all on function public.agent_lab_rate(bigint, jsonb, text) from public, a
 revoke all on function public.agent_lab_summary() from public, anon, authenticated;
 
 grant execute on function public.agent_runtime_config() to service_role;
-grant execute on function public.agent_preview_reserve(text, text, integer, integer) to service_role;
+grant execute on function public.agent_preview_reserve(text, text, integer, integer, text) to service_role;
 grant execute on function public.agent_preview_settle(uuid, integer, integer, integer) to service_role;
 grant execute on function public.agent_preview_release(uuid) to service_role;
 grant execute on function public.agent_preview_log_turn(jsonb) to service_role;

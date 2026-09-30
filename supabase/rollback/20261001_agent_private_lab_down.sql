@@ -5,7 +5,7 @@
 -- private.settings.agent se quedan (inofensivas; public_enabled=false).
 begin;
 drop function if exists public.agent_runtime_config();
-drop function if exists public.agent_preview_reserve(text, text, integer, integer);
+drop function if exists public.agent_preview_reserve(text, text, integer, integer, text);
 drop function if exists public.agent_preview_settle(uuid, integer, integer, integer);
 drop function if exists public.agent_preview_release(uuid);
 drop function if exists public.agent_preview_log_turn(jsonb);

@@ -2,8 +2,8 @@
 //
 // En PR2 solo funciona el MODO PRIVADO (laboratorio del CRM, administradores):
 // el modo público responde 403 mientras agent.public_enabled sea false.
-// Proveedor: simulador (AGENT_PROVIDER=simulated). El proveedor real de
-// OpenAI (paso 9) no está implementado: sin él, todo acaba en fallback.
+// Proveedor: AGENT_PROVIDER=openai (Responses API, store:false, sin
+// herramientas) o simulated (laboratorio). Sin proveedor válido → fallback.
 //
 // Orden de controles por mensaje: CORS → tamaño → modo/probador → modelo →
 // historial firmado → límites de conversación y longitud → redacción de datos
@@ -16,17 +16,20 @@ import { AI_DISCLOSURE, fallbackReply, type FallbackReason } from "./fallback.ts
 import { detectInjection } from "./guard.ts";
 import { KB } from "./kb.ts";
 import { buildInput, buildInstructions, estimateTokens } from "./prompt.ts";
-import { notEnabledProvider, ProviderNotEnabled, resolveEndpoint, simulatedProvider, type ModelProvider, type Usage } from "./providers.ts";
+import {
+  notEnabledProvider, openaiProvider, ProviderHttpError, ProviderNotEnabled, resolveEndpoint, simulatedProvider,
+  type ModelProvider, type Usage,
+} from "./providers.ts";
 import { redact } from "./redact.ts";
 import { type AgentState, canaryFor, newConversationId, signState, verifyState } from "./state.ts";
-import { validateOutput } from "./validate.ts";
+import { OUTPUT_SCHEMA, validateOutput } from "./validate.ts";
 
 type Env = (name: string) => string | undefined;
 export type Deps = { env: Env; fetch: typeof fetch; provider?: ModelProvider; now?: () => number; timeoutMs?: number };
 
 type RuntimeConfig = {
   enabled: boolean; public_enabled: boolean; preview_enabled: boolean; region: string;
-  models: Record<string, { in: number; cached_in: number; out: number; eu: boolean | null }>;
+  models: Record<string, { in: number; cached_in: number; out: number; eu: boolean | null; api_model?: string }>;
   max_input_chars: number; max_output_tokens: number; max_history_turns: number;
 };
 
@@ -44,6 +47,13 @@ const corsHeaders = (origin: string | null, env: Env): Record<string, string> =>
 });
 const json = (status: number, body: Record<string, unknown>, cors: Record<string, string>) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+
+// Identificador estable y anónimo para la detección de abuso de OpenAI
+// (recomendado por su API): hash de la conversación, sin datos personales.
+async function safetyIdFor(conversationId: string) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`lp-agent:${conversationId}`)));
+  return Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 export async function handleRequest(request: Request, deps: Deps): Promise<Response> {
   const { env } = deps;
@@ -147,24 +157,31 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     if (injection.suspicious) fallback("injection");
   }
 
-  const provider = deps.provider ?? (env("AGENT_PROVIDER") === "simulated" ? simulatedProvider() : notEnabledProvider);
-  filters.provider = provider.name;
-
-  if (!fallbackReason && provider === notEnabledProvider) fallback("provider_not_enabled");
-  if (!fallbackReason && provider.name === "openai") {
+  // Proveedor. OpenAI solo con clave y con la región configurada disponible
+  // para el modelo: si no, NO se llama (sin cambio silencioso de región).
+  let provider: ModelProvider = notEnabledProvider;
+  let regionBlocked = false;
+  const openaiKey = env("OPENAI_API_KEY");
+  if (deps.provider) provider = deps.provider;
+  else if (env("AGENT_PROVIDER") === "simulated") provider = simulatedProvider();
+  else if (env("AGENT_PROVIDER") === "openai" && openaiKey) {
     const endpoint = resolveEndpoint(config, model);
     filters.region = config.region;
-    if (!endpoint.ok) fallback("region_unavailable");
+    if (endpoint.ok) {
+      filters.endpoint = endpoint.baseUrl;
+      provider = openaiProvider({
+        apiKey: openaiKey, baseUrl: endpoint.baseUrl, fetch: deps.fetch, schema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
+        apiModel: (name) => config.models[name]?.api_model || name,
+      });
+    } else regionBlocked = true;
   }
-
-  if (!fallbackReason) {
-    try {
-      const moderation = await provider.moderate(redacted.text);
-      if (moderation.flagged) fallback("moderation");
-    } catch (error) {
-      fallback(error instanceof ProviderNotEnabled ? "provider_not_enabled" : "provider_error");
-    }
-  }
+  filters.provider = regionBlocked ? "openai" : provider.name;
+  if (!fallbackReason && regionBlocked) fallback("region_unavailable");
+  if (!fallbackReason && provider === notEnabledProvider) fallback("provider_not_enabled");
+  const providerFailure = (error: unknown): FallbackReason => {
+    if (error instanceof ProviderHttpError) filters.provider_error = { status: error.status, code: error.code };
+    return error instanceof ProviderNotEnabled ? "provider_not_enabled" : "provider_error";
+  };
 
   if (!fallbackReason) {
     const instructions = buildInstructions(canary);
@@ -172,26 +189,39 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     const maxInput = estimateTokens(instructions) + input.reduce((n, m) => n + estimateTokens(m.content), 0);
     let reservation: { status: string; reservation_id?: string };
     try {
+      // La reserva va ANTES de cualquier contacto con el proveedor (también la
+      // moderación): así el presupuesto y el cupo de llamadas reales lo cubren todo.
       reservation = await rpc("agent_preview_reserve", {
         p_conversation_id: state.c, p_model: model, p_max_input_tokens: maxInput, p_max_output_tokens: config.max_output_tokens,
+        p_provider: provider.name,
       });
     } catch {
       reservation = { status: "provider_error" };
     }
     if (reservation.status !== "reserved") {
-      const known: FallbackReason[] = ["disabled", "budget_exhausted", "rate_limited", "model_invalid"];
+      const known: FallbackReason[] = ["disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted"];
       fallback(known.includes(reservation.status as FallbackReason) ? reservation.status as FallbackReason : "provider_error");
     } else {
+      try {
+        const moderation = await provider.moderate(redacted.text);
+        if (moderation.flagged) fallback("moderation");
+      } catch (error) {
+        fallback(providerFailure(error));
+      }
+    }
+    if (reservation.status === "reserved" && fallbackReason) {
+      await rpc("agent_preview_release", { p_reservation_id: reservation.reservation_id }).catch(() => {});
+    } else if (reservation.status === "reserved") {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
       let generated: { text: string; usage: Usage } | null = null;
       try {
         generated = await provider.generate({
           model, instructions, input, maxOutputTokens: config.max_output_tokens,
-          promptCacheKey: `lp-agent-${KB.version}`, signal: controller.signal,
+          promptCacheKey: `lp-agent-${KB.version}`, safetyId: await safetyIdFor(state.c), signal: controller.signal,
         });
       } catch (error) {
-        fallback(controller.signal.aborted ? "timeout" : error instanceof ProviderNotEnabled ? "provider_not_enabled" : "provider_error");
+        fallback(controller.signal.aborted ? "timeout" : providerFailure(error));
       } finally {
         clearTimeout(timer);
       }

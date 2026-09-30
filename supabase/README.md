@@ -30,8 +30,9 @@
 11. PR1e (checkout `super-api` endurecido y después retirado —la web usa la
     plataforma para contratar—; retirada de `dynamic-endpoint` y `rapid-api`):
     `supabase/deploy/PR1e.md`.
-12. PR2 (agente comercial de IA; en construcción, **no desplegado**): laboratorio
-    privado en el CRM con OpenAI simulado. Diseño y estado en `docs/pr2/`.
+12. PR2 (agente comercial de IA, **solo modo privado**, no desplegado todavía):
+    laboratorio en el CRM, proveedor OpenAI (store:false, sin herramientas) y
+    simulador. Diseño en `docs/pr2/`, despliegue en `supabase/deploy/PR2.md`.
 
 ## 2. Crear usuario para el CRM
 

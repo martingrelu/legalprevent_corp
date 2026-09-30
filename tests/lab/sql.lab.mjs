@@ -352,16 +352,20 @@ test("la migración de PR2 se puede reaplicar y verify_pr2_migration.sql supera 
 });
 
 test("el verificador de PR2 detecta vulnerabilidades y errores reintroducidos", () => {
-  psql("lab", "grant execute on function public.agent_preview_reserve(text,text,integer,integer) to anon;");
+  psql("lab", "grant execute on function public.agent_preview_reserve(text,text,integer,integer,text) to anon;");
   try {
     assert.match(verifyPr2(), /FALLO: anon pudo reservar presupuesto de pruebas/);
   } finally {
-    psql("lab", "revoke execute on function public.agent_preview_reserve(text,text,integer,integer) from anon;");
+    psql("lab", "revoke execute on function public.agent_preview_reserve(text,text,integer,integer,text) from anon;");
   }
-  withFunctionMutation("public.agent_preview_reserve(text,text,integer,integer)",
+  withFunctionMutation("public.agent_preview_reserve(text,text,integer,integer,text)",
     "if v_committed + v_estimate > coalesce((v_config ->> 'preview_budget_eur')::numeric, 0) then",
     "if false then", () =>
       assert.match(verifyPr2(), /FALLO: superó el presupuesto de pruebas/));
+  withFunctionMutation("public.agent_preview_reserve(text,text,integer,integer,text)",
+    "if (v_config ->> 'real_call_allowance')::integer <= 0 then",
+    "if false then", () =>
+      assert.match(verifyPr2(), /FALLO: (sin cupo se permitió una llamada real|se permitió una segunda llamada real)/));
   withFunctionMutation("public.agent_lab_summary()",
     "if not public.is_crm_admin() then", "if false then", () =>
       assert.match(verifyPr2(), /FALLO: un usuario sin rol de administrador vio el laboratorio/));

@@ -1,18 +1,22 @@
-// Proveedores de modelo. En los pasos 1–8 de PR2 solo existe el SIMULADOR
-// (sin clave, sin gasto). El proveedor real de OpenAI (paso 9) no está
-// implementado: seleccionarlo devuelve provider_not_enabled y el visitante
-// recibe el fallback.
+// Proveedores de modelo:
+// - `simulated`: simulador determinista (laboratorio y pruebas, sin clave).
+// - `openai`: OpenAI Responses API (paso 9). Siempre store:false, sin
+//   herramientas (no se envía `tools`), salida JSON con esquema estricto,
+//   reasoning.effort "none", max_output_tokens acotado, timeout del llamante y
+//   moderación previa gratuita (omni-moderation-latest). Región según
+//   configuración, sin cambio silencioso (ver resolveEndpoint).
 import type { ModelMessage } from "./prompt.ts";
 import { fallbackReply, intentByRules } from "./fallback.ts";
 import type { Action } from "./actions.ts";
 
-export type Usage = { input: number; cached: number; output: number };
+export type Usage = { input: number; cached: number; output: number; reasoning?: number };
 export type GenerateRequest = {
   model: string;
   instructions: string;
   input: ModelMessage[];
   maxOutputTokens: number;
   promptCacheKey: string;
+  safetyId?: string;
   signal?: AbortSignal;
 };
 export type ModelProvider = {
@@ -22,6 +26,16 @@ export type ModelProvider = {
 };
 
 export class ProviderNotEnabled extends Error {}
+// Error HTTP del proveedor: solo estado y código (nunca el cuerpo completo).
+export class ProviderHttpError extends Error {
+  status: number;
+  code: string | null;
+  constructor(status: number, code: string | null) {
+    super(`provider_http_${status}`);
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export const notEnabledProvider: ModelProvider = {
   name: "openai",
@@ -37,6 +51,80 @@ export function resolveEndpoint(config: { region?: string; models?: Record<strin
   }
   if (config.region === "global") return { ok: true as const, baseUrl: "https://api.openai.com/v1" };
   return { ok: false as const };
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI (Responses API + Moderations)
+// ---------------------------------------------------------------------------
+export type OpenAIOptions = {
+  apiKey: string;
+  baseUrl: string;                       // https://eu.api.openai.com/v1 | https://api.openai.com/v1
+  fetch: typeof fetch;
+  apiModel: (model: string) => string;   // p. ej. versión fija (snapshot)
+  schema: Record<string, unknown>;
+};
+
+async function openaiError(response: Response) {
+  let code: string | null = null;
+  try {
+    const body = await response.json();
+    code = typeof body?.error?.code === "string" ? body.error.code : typeof body?.error?.type === "string" ? body.error.type : null;
+  } catch {
+    code = null;
+  }
+  return new ProviderHttpError(response.status, code);
+}
+
+export function openaiProvider(options: OpenAIOptions): ModelProvider {
+  const headers = { Authorization: `Bearer ${options.apiKey}`, "Content-Type": "application/json" };
+  return {
+    name: "openai",
+    async moderate(text) {
+      const response = await options.fetch(`${options.baseUrl}/moderations`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model: "omni-moderation-latest", input: text }),
+      });
+      if (!response.ok) throw await openaiError(response);
+      const body = await response.json();
+      return { flagged: Boolean(body?.results?.some((result: { flagged?: boolean }) => result?.flagged)) };
+    },
+    async generate(request) {
+      const response = await options.fetch(`${options.baseUrl}/responses`, {
+        method: "POST",
+        headers,
+        signal: request.signal,
+        body: JSON.stringify({
+          model: options.apiModel(request.model),
+          instructions: request.instructions,
+          input: request.input.map((message) => ({ role: message.role, content: message.content })),
+          store: false,
+          max_output_tokens: request.maxOutputTokens,
+          reasoning: { effort: "none" },
+          text: { format: { type: "json_schema", name: "respuesta_agente", schema: options.schema, strict: true } },
+          prompt_cache_key: request.promptCacheKey,
+          ...(request.safetyId ? { safety_identifier: request.safetyId } : {}),
+        }),
+      });
+      if (!response.ok) throw await openaiError(response);
+      const body = await response.json();
+      const text = (body?.output ?? [])
+        .filter((item: { type?: string }) => item?.type === "message")
+        .flatMap((item: { content?: Array<{ type?: string; text?: string }> }) => item.content ?? [])
+        .filter((part: { type?: string }) => part?.type === "output_text")
+        .map((part: { text?: string }) => part.text ?? "")
+        .join("");
+      const usage: Usage = {
+        input: Number(body?.usage?.input_tokens ?? 0),
+        cached: Number(body?.usage?.input_tokens_details?.cached_tokens ?? 0),
+        output: Number(body?.usage?.output_tokens ?? 0),
+        reasoning: Number(body?.usage?.output_tokens_details?.reasoning_tokens ?? 0),
+      };
+      // Respuesta incompleta (p. ej. max_output_tokens): se devuelve tal cual; el
+      // validador la rechazará y lo consumido se liquida igualmente.
+      return { text, usage };
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -83,6 +83,29 @@ begin
   reset role;
   update private.settings set value = value || '{"preview_budget_eur": 5}' where key = 'agent';
 
+  -- 4b. Cupo de llamadas reales: 0 por defecto; con 1, exactamente una; el simulador no lo consume.
+  if (v_config -> 'real_call_allowance') is distinct from '0'::jsonb then raise exception 'FALLO: el cupo de llamadas reales no es 0 por defecto'; end if;
+  set local role service_role;
+  if public.agent_preview_reserve(conv, 'gpt-6-luna', 100, 100, 'openai') ->> 'status' <> 'allowance_exhausted' then
+    raise exception 'FALLO: sin cupo se permitió una llamada real';
+  end if;
+  if public.agent_preview_reserve(conv, 'gpt-6-luna', 100, 100, 'simulated') ->> 'status' <> 'reserved' then
+    raise exception 'FALLO: el cupo bloqueó al simulador';
+  end if;
+  reset role;
+  update private.settings set value = jsonb_set(value, '{real_call_allowance}', '1') where key = 'agent';
+  set local role service_role;
+  if public.agent_preview_reserve(conv, 'gpt-6-luna', 100, 100, 'openai') ->> 'status' <> 'reserved' then
+    raise exception 'FALLO: con cupo 1 no se permitió la llamada real';
+  end if;
+  if public.agent_preview_reserve(conv, 'gpt-6-luna', 100, 100, 'openai') ->> 'status' <> 'allowance_exhausted' then
+    raise exception 'FALLO: se permitió una segunda llamada real con cupo 1';
+  end if;
+  reset role;
+  if (select value -> 'real_call_allowance' from private.settings where key = 'agent') is distinct from '0'::jsonb then
+    raise exception 'FALLO: el cupo no se descontó';
+  end if;
+
   -- 5. Conversaciones de prueba: nunca con emails; caducan a los 30 días.
   begin
     set local role service_role;
