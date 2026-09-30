@@ -11,8 +11,8 @@ import {
   ROLES,
   TASK_STATUSES,
   SCHEMA,
-} from "./models.js?v=20261001-1";
-import { handleAgentLabEvent, mountAgentLab, renderAgentLab } from "./agent-lab.js?v=20261001-1";
+} from "./models.js?v=20261001-2";
+import { handleAgentLabEvent, mountAgentLab, renderAgentLab } from "./agent-lab.js?v=20261001-2";
 import {
   addInteraction,
   applyAutomations,
@@ -49,8 +49,8 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20261001-1";
-import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261001-1";
+} from "./store.js?v=20261001-2";
+import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261001-2";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();

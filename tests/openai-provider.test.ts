@@ -145,16 +145,19 @@ test("límite de gasto de OpenAI (429) o región no aprobada (403): fallback, re
     const text = await (await handleRequest(ask("¿Cuánto cuesta?"), deps)).text();
     const body = JSON.parse(text);
     assert.equal(body.debug.fallback_reason, "provider_error", String(status));
-    assert.deepEqual(body.debug.filters.provider_error, { status, code });
+    assert.equal(body.debug.filters.provider_error.status, status);
+    assert.equal(body.debug.filters.provider_error.code, code);
+    assert.equal(body.debug.filters.provider_error.message, "detalle interno", "diagnóstico saneado en la depuración privada");
+    assert.doesNotMatch(body.reply, /detalle interno|401|403|429|500/, "el visitante nunca lo ve");
     assert.equal(rpc("agent_preview_release").length, 1);
     assert.equal(rpc("agent_preview_settle").length, 0);
-    assert.doesNotMatch(text, /detalle interno/);
     assert.match(body.reply, /29 €\/mes/, "fallback comercial útil");
   }
   const { deps } = setup({ moderationStatus: 403, moderation: { error: { code: "unsupported_country_region_territory" } } });
   const body = await (await handleRequest(ask("hola"), deps)).json();
   assert.equal(body.debug.fallback_reason, "provider_error");
-  assert.deepEqual(body.debug.filters.provider_error, { status: 403, code: "unsupported_country_region_territory" });
+  assert.equal(body.debug.filters.provider_error.status, 403);
+  assert.equal(body.debug.filters.provider_error.code, "unsupported_country_region_territory");
 });
 
 test("salida maliciosa, rechazo o truncada: se paga lo consumido y no llega al visitante", async () => {

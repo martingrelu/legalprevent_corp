@@ -319,13 +319,25 @@ var estimateTokens = (text) => Math.ceil(text.length / 3) + 16;
 // supabase/functions/sales-agent/providers.ts
 var ProviderNotEnabled = class extends Error {
 };
+var PROVIDER_MESSAGE_MAX = 240;
+function sanitizeProviderText(raw, max = PROVIDER_MESSAGE_MAX) {
+  if (raw === null || raw === void 0) return null;
+  let text = String(raw).slice(0, 8e3);
+  text = text.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]*>/g, " ");
+  text = text.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ");
+  text = text.replace(/\bauthorization\b\s*[:=]\s*\S+(\s+\S+)?/gi, "authorization: [oculto]").replace(/\bbearer\s+\S+/gi, "Bearer [oculto]").replace(/\bsk-[A-Za-z0-9_*.\-]{2,}/g, "sk-[oculto]").replace(/\beyJ[A-Za-z0-9_-]{6,}(?:\.[A-Za-z0-9_-]*){0,2}/g, "[jwt oculto]").replace(/\b(org|proj|user|sess|key|req)[-_][A-Za-z0-9]{6,}\b/g, "$1-[oculto]").replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]").replace(/[A-Za-z0-9+/_=-]{32,}/g, "[oculto]").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max - 1)}\u2026` : text;
+}
 var ProviderHttpError = class extends Error {
   status;
   code;
-  constructor(status, code) {
-    super(`provider_http_${status}`);
-    this.status = status;
-    this.code = code;
+  info;
+  constructor(info) {
+    super(`provider_http_${info.status}`);
+    this.status = info.status;
+    this.code = info.code;
+    this.info = info;
   }
 };
 var notEnabledProvider = {
@@ -340,15 +352,29 @@ function resolveEndpoint(config, model) {
   if (config.region === "global") return { ok: true, baseUrl: "https://api.openai.com/v1" };
   return { ok: false };
 }
+var shortField = (value) => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,80}$/.test(value) ? value : null;
 async function openaiError(response) {
-  let code = null;
+  let raw = "";
   try {
-    const body = await response.json();
-    code = typeof body?.error?.code === "string" ? body.error.code : typeof body?.error?.type === "string" ? body.error.type : null;
+    raw = (await response.text()).slice(0, 8e3);
   } catch {
-    code = null;
+    raw = "";
   }
-  return new ProviderHttpError(response.status, code);
+  let body = null;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    body = null;
+  }
+  const error = body && typeof body === "object" ? body.error : void 0;
+  return new ProviderHttpError({
+    status: response.status,
+    code: shortField(error?.code),
+    type: shortField(error?.type),
+    message: sanitizeProviderText(error && typeof error === "object" ? error.message : raw),
+    request_id: shortField(response.headers.get("x-request-id")),
+    content_type: sanitizeProviderText((response.headers.get("content-type") || "").split(";")[0], 60)
+  });
 }
 function openaiProvider(options) {
   const headers = { Authorization: `Bearer ${options.apiKey}`, "Content-Type": "application/json" };
@@ -687,7 +713,7 @@ async function handleRequest(request, deps) {
   if (!fallbackReason && regionBlocked) fallback("region_unavailable");
   if (!fallbackReason && provider === notEnabledProvider) fallback("provider_not_enabled");
   const providerFailure = (error) => {
-    if (error instanceof ProviderHttpError) filters.provider_error = { status: error.status, code: error.code };
+    if (error instanceof ProviderHttpError) filters.provider_error = error.info;
     return error instanceof ProviderNotEnabled ? "provider_not_enabled" : "provider_error";
   };
   if (!fallbackReason) {

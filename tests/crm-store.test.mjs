@@ -1,7 +1,7 @@
 // CRM: conversión de filas de Supabase, filtros y métricas (PR1a).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dashboardMetrics, filteredLeads, leadFromSupabaseRow, removeLeadAndRelated } from "../crm/src/store.js?v=20261001-1";
+import { dashboardMetrics, filteredLeads, leadFromSupabaseRow, removeLeadAndRelated } from "../crm/src/store.js?v=20261001-2";
 
 const row = (extra = {}) => ({
   id: "3f2b9c1e-8a4d-4f6b-9c2e-1a2b3c4d5e6f",
