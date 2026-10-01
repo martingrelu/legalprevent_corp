@@ -8,7 +8,7 @@ import { KB } from "./kb.ts";
 export type FallbackReason =
   | "disabled" | "budget_exhausted" | "rate_limited" | "model_invalid" | "session_limit" | "daily_limit"
   | "conversation_limit" | "message_too_long" | "injection" | "moderation" | "provider_error" | "timeout"
-  | "invalid_output" | "region_unavailable" | "provider_not_enabled" | "allowance_exhausted";
+  | "invalid_output" | "refusal" | "region_unavailable" | "provider_not_enabled" | "allowance_exhausted";
 
 const PARTNER = /\b(gestor[ií]a|asesor[ií]a|despacho|cartera de clientes|mis clientes|varias empresas|muchas empresas|empresas cliente|llevo la (contabilidad|gesti[oó]n))\b/i;
 

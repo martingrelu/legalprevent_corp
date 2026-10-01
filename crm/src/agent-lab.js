@@ -6,6 +6,8 @@
 const MODELS = ["gpt-5.4-mini", "gpt-5.6-luna", "gpt-6-luna"];
 const BATTERY_URL = "../docs/pr2/eval/bateria-v1.json";
 const RATING_KEYS = ["precision", "utilidad", "limites", "tono", "conversion"];
+// Turnos visibles para valorar: los del modelo seleccionado (una tanda de la batería son 62).
+const RATING_TURNS_MAX = 100;
 // La batería respeta el tope global de mensajes por minuto (agent.max_calls_per_minute,
 // 20 por defecto): ~3,2 s entre mensajes y, si aun así lo alcanza, espera y reintenta.
 const BATTERY_PACE_MS = 3200;
@@ -84,7 +86,7 @@ export function renderAgentLab() {
       </section>
 
       <section class="panel">
-        <h3>Valoración humana (últimos turnos)</h3>
+        <h3>Valoración humana (últimos turnos de ${esc(lab.model)})</h3>
         <button class="ghost-button" data-lab="refresh">Actualizar</button>
         ${renderTurns()}
       </section>
@@ -96,6 +98,8 @@ function renderMessage(message) {
   if (message.role === "user") return `<div class="agent-msg user"><p>${esc(message.text)}</p></div>`;
   const d = message.debug || {};
   const validation = d.filters?.validation?.length ? ` · filtros: ${esc(d.filters.validation.join(", "))}` : "";
+  const returned = d.filters?.model_returned ? ` · modelo devuelto ${esc(d.filters.model_returned)}` : "";
+  const refusal = d.filters?.refusal ? " · <strong>negativa del modelo</strong>" : "";
   const pe = d.filters?.provider_error;
   const providerError = pe
     ? `<small class="agent-debug agent-provider-error">Error del proveedor: HTTP ${esc(pe.status)}${pe.code ? ` · código ${esc(pe.code)}` : ""}${pe.type ? ` · tipo ${esc(pe.type)}` : ""}${pe.content_type ? ` · ${esc(pe.content_type)}` : ""}${pe.request_id ? ` · petición ${esc(pe.request_id)}` : ""}${pe.message ? `<br>«${esc(pe.message)}»` : ""}</small>`
@@ -106,7 +110,7 @@ function renderMessage(message) {
       ${message.actions?.length ? `<div class="agent-actions">${message.actions.map((a) => `<span class="chip">${esc(a.label)}${a.url ? ` → ${esc(a.url)}` : a.form ? " (formulario)" : ""}</span>`).join("")}</div>` : ""}
       <small class="agent-debug">${esc(d.model)} · ${esc(d.provider)} · intención ${esc(message.intent)} ·
         ${d.fallback_reason ? `<strong>fallback: ${esc(d.fallback_reason)}</strong>` : "respuesta del modelo"} ·
-        tokens ${d.usage ? `${d.usage.input}/${d.usage.cached}/${d.usage.output}` : "0"} · ${euros(d.cost_eur)} · ${esc(d.latency_ms)} ms${validation}</small>
+        tokens ${d.usage ? `${d.usage.input}/${d.usage.cached}/${d.usage.output}` : "0"} · ${euros(d.cost_eur)} · ${esc(d.latency_ms)} ms${returned}${refusal}${validation}</small>
       ${providerError}
     </div>`;
 }
@@ -141,10 +145,11 @@ function renderSummary() {
 }
 
 function renderTurns() {
-  if (!lab.turns.length) return `<p class="muted">Sin turnos todavía.</p>`;
-  return `<div class="agent-lab-turns">${lab.turns.slice(0, 60).map((t) => `
+  const turns = lab.turns.filter((t) => t.model === lab.model).slice(0, RATING_TURNS_MAX);
+  if (!turns.length) return `<p class="muted">Sin turnos todavía con ${esc(lab.model)}.</p>`;
+  return `<div class="agent-lab-turns">${turns.map((t) => `
     <form class="agent-turn" data-lab="rate" data-id="${esc(t.id)}">
-      <p><small>${esc(t.model)} · ${esc(t.case_id || "libre")} · turno ${esc(t.turn)} ${t.fallback_reason ? `· fallback ${esc(t.fallback_reason)}` : ""}${t.filters?.provider_error ? ` · HTTP ${esc(t.filters.provider_error.status)}${t.filters.provider_error.message ? ` «${esc(t.filters.provider_error.message)}»` : ""}` : ""}</small></p>
+      <p><small>${esc(t.model)} · ${esc(t.case_id || "libre")} · turno ${esc(t.turn)}${t.filters?.model_returned ? ` · ${esc(t.filters.model_returned)}` : ""}${t.filters?.refusal ? " · negativa del modelo" : ""} ${t.fallback_reason ? `· fallback ${esc(t.fallback_reason)}` : ""}${t.filters?.provider_error ? ` · HTTP ${esc(t.filters.provider_error.status)}${t.filters.provider_error.message ? ` «${esc(t.filters.provider_error.message)}»` : ""}` : ""}</small></p>
       <p><strong>Visitante:</strong> ${esc(t.user_text)}</p>
       <p><strong>Agente:</strong> ${esc(t.reply)}</p>
       <div class="agent-rating">

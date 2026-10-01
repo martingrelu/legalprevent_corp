@@ -160,10 +160,9 @@ test("límite de gasto de OpenAI (429) o región no aprobada (403): fallback, re
   assert.equal(body.debug.filters.provider_error.code, "unsupported_country_region_territory");
 });
 
-test("salida maliciosa, rechazo o truncada: se paga lo consumido y no llega al visitante", async () => {
+test("salida maliciosa o truncada: se paga lo consumido y no llega al visitante", async () => {
   const outputs = [
     [{ type: "output_text", text: JSON.stringify({ reply: "Te hago un 30% de descuento: 55 €/mes.", intent: "precios", actions: [] }) }],
-    [{ type: "refusal", refusal: "No puedo ayudar con eso." }],
     [{ type: "output_text", text: "{\"reply\": \"El plan Pyme cue" }],
   ];
   for (const content of outputs) {
@@ -191,4 +190,63 @@ test("la clave de OpenAI nunca aparece en la respuesta ni en lo que se guarda", 
   const text = await (await handleRequest(ask("hola"), deps)).text();
   assert.ok(!text.includes(OPENAI_KEY));
   assert.ok(!JSON.stringify(rpc("agent_preview_log_turn")).includes(OPENAI_KEY));
+});
+
+test("modelo exacto devuelto por OpenAI: se registra solo en el laboratorio privado", async () => {
+  const { deps, rpc } = setup({
+    response: {
+      status: "completed", model: "gpt-6-luna-2026-08-14",
+      output: [{ type: "message", content: [{ type: "output_text", text: goodOutput }] }],
+      usage: { input_tokens: 1474, output_tokens: 116 },
+    },
+  });
+  const body = await (await handleRequest(ask("¿Cuánto cuesta?"), deps)).json();
+  assert.equal(body.debug.fallback_reason, null);
+  assert.equal(body.debug.filters.model_returned, "gpt-6-luna-2026-08-14");
+  assert.equal(body.debug.filters.refusal, undefined);
+  const logged = rpc("agent_preview_log_turn")[0].body.p_turn;
+  assert.equal(logged.model, "gpt-6-luna");
+  assert.equal(logged.filters.model_returned, "gpt-6-luna-2026-08-14");
+});
+
+test("modelo devuelto con formato inesperado: no se guarda (null)", async () => {
+  for (const model of ["gpt 6 <b>luna</b>", "x".repeat(200), "Bearer sk-abc", 42, null]) {
+    const { deps, rpc } = setup({
+      response: { model, output: [{ type: "message", content: [{ type: "output_text", text: goodOutput }] }], usage: { input_tokens: 10, output_tokens: 5 } },
+    });
+    const body = await (await handleRequest(ask("¿Cuánto cuesta?"), deps)).json();
+    assert.equal(body.debug.filters.model_returned, null, String(model));
+    assert.equal(rpc("agent_preview_log_turn")[0].body.p_turn.filters.model_returned, null);
+  }
+});
+
+test("negativa (refusal) de OpenAI: fallback propio, marcada, sin guardar su texto y pagando lo consumido", async () => {
+  const { deps, rpc } = setup({
+    response: {
+      status: "completed", model: "gpt-6-luna-2026-08-14",
+      output: [{ type: "message", content: [{ type: "refusal", refusal: "No puedo ayudar con eso." }] }],
+      usage: { input_tokens: 900, output_tokens: 12 },
+    },
+  });
+  const raw = await (await handleRequest(ask("¿Cuánto cuesta?"), deps)).text();
+  const body = JSON.parse(raw);
+  assert.equal(body.debug.fallback_reason, "refusal");
+  assert.equal(body.debug.filters.refusal, true);
+  assert.equal(body.debug.filters.model_returned, "gpt-6-luna-2026-08-14");
+  assert.equal(body.debug.filters.validation, undefined);
+  assert.equal(rpc("agent_preview_settle").length, 1);
+  assert.equal(rpc("agent_preview_release").length, 0);
+  const logged = rpc("agent_preview_log_turn")[0].body.p_turn;
+  assert.equal(logged.fallback_reason, "refusal");
+  assert.equal(logged.filters.refusal, true);
+  assert.ok(!raw.includes("No puedo ayudar con eso"));
+  assert.ok(!JSON.stringify(logged).includes("No puedo ayudar con eso"));
+  assert.match(body.reply, /^Soy el asistente virtual de LegalPrevent/);
+});
+
+test("respuesta normal: sin marca de negativa", async () => {
+  const { deps } = setup();
+  const body = await (await handleRequest(ask("hola"), deps)).json();
+  assert.equal(body.debug.filters.refusal, undefined);
+  assert.equal(body.debug.filters.model_returned, null);
 });
