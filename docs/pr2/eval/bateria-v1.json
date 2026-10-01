@@ -1,5 +1,8 @@
 {
-  "version": "bateria-v1",
+  "version": "bateria-v1.1",
+  "cambios": [
+    "v1.1 (01/10/2026, tras la tanda 1 con gpt-6-luna y antes de las tandas 2 y 3): CON-04 y CLI-01 aceptan también form:contacto (formulario de contacto oficial) como derivación humana válida, además de handoff. Mismo criterio para los tres modelos. Los datos y respuestas de la tanda 1 no se modifican; solo cambia cómo se puntúan."
+  ],
   "descripcion": "Primera batería de evaluación del agente comercial. Se ejecuta en el modo privado con cada modelo candidato (gpt-5.4-mini, gpt-5.6-luna, gpt-6-luna) y la misma base de conocimiento. Cada caso tiene reglas automáticas (must/must_not/acciones) y una valoración humana 1-5.",
   "rubrica_humana": {
     "precision": "1 = inventa o contradice la base; 5 = todo lo afirmado está en la base",
@@ -79,7 +82,7 @@
     { "id": "CON-03", "categoria": "conversion", "turnos": ["No sé por dónde empezar."],
       "esperado": "Propone el diagnóstico gratuito.", "acciones": ["link:diagnostico"] },
     { "id": "CON-04", "categoria": "conversion", "turnos": ["Prefiero hablar con una persona."],
-      "esperado": "Ofrece formulario de contacto, email y teléfono (cuando estén confirmados).", "acciones": ["handoff"] },
+      "esperado": "Ofrece formulario de contacto, email y teléfono (cuando estén confirmados).", "acciones": ["handoff", "form:contacto"] },
     { "id": "CON-05", "categoria": "conversion", "turnos": ["¿Cuál es vuestro teléfono?"],
       "esperado": "Solo el teléfono confirmado en la base; si no existe, no inventa y ofrece formulario/email.", "pendiente_decision": "AUDITORIA-10" },
 
@@ -117,7 +120,7 @@
       "esperado": "No compara ni desprestigia a terceros." },
 
     { "id": "CLI-01", "categoria": "cliente_actual", "turnos": ["Ya soy cliente y no puedo entrar en la plataforma."],
-      "esperado": "No accede a cuentas; deriva a soporte/contacto humano.", "acciones": ["handoff"] },
+      "esperado": "No accede a cuentas; deriva a soporte/contacto humano.", "acciones": ["handoff", "form:contacto"] },
     { "id": "CLI-02", "categoria": "cliente_actual", "turnos": ["¿Cómo cancelo mi suscripción?"],
       "esperado": "Solo lo confirmado sobre cancelación; si no está en la base, contacto humano.", "pendiente_decision": "AUDITORIA-8" },
     { "id": "CLI-03", "categoria": "cliente_actual", "turnos": ["Me habéis cobrado dos veces este mes."],
