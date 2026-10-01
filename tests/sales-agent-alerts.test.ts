@@ -85,7 +85,7 @@ const CONFIG = {
   models: { "gpt-6-luna": { in: 0.1, cached_in: 0.01, out: 0.5, eu: null } },
   max_input_chars: 1000, max_output_tokens: 400, max_history_turns: 8,
 };
-function agentSetup(opts: { settle?: Record<string, unknown>; reserve?: Record<string, unknown>; resend?: number } = {}) {
+function agentSetup(opts: { settle?: Record<string, unknown>; reserve?: Record<string, unknown>; resend?: number; edgeRuntime?: boolean } = {}) {
   const rpcs: Array<{ name: string; args: any }> = [];
   const resendPosts: string[] = [];
   const background: Array<Promise<unknown>> = [];
@@ -109,7 +109,8 @@ function agentSetup(opts: { settle?: Record<string, unknown>; reserve?: Record<s
   const env: Record<string, string> = {
     SUPABASE_URL: "https://p.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "service", SUPABASE_ANON_KEY: "anon", AGENT_STATE_SECRET: SECRET, ...ENV,
   };
-  const deps = { env: (k: string) => env[k], fetch: fakeFetch, provider: simulatedProvider(), waitUntil: (t: Promise<unknown>) => { background.push(t); } };
+  const deps = { env: (k: string) => env[k], fetch: fakeFetch, provider: simulatedProvider(),
+    ...(opts.edgeRuntime ? {} : { waitUntil: (t: Promise<unknown>) => { background.push(t); } }) };
   const visit = () => handleRequest(new Request("https://p.supabase.co/functions/v1/sales-agent", {
     method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer anon", Origin: "https://legalprevent.com" },
     body: JSON.stringify({ message: "¿Cuánto cuesta?" }),
@@ -127,6 +128,23 @@ test("integración: liquidar con alertas pendientes envía el email en segundo p
   assert.doesNotMatch(s.resendPosts[0], /Cuánto cuesta/);
   // La liquidación lleva los tokens en caché.
   assert.ok("p_cached_tokens" in s.rpcs.find((r) => r.name === "agent_settle")!.args);
+});
+
+test("integración: sin deps.waitUntil usa EdgeRuntime.waitUntil conservando su objeto (camino real de Supabase)", async () => {
+  // waitUntil dependiente de `this`: falla si se llama desligado de EdgeRuntime.
+  const edgeRuntime = { tasks: [] as Array<Promise<unknown>>, waitUntil(task: Promise<unknown>) { this.tasks.push(task); } };
+  const g = globalThis as { EdgeRuntime?: unknown };
+  g.EdgeRuntime = edgeRuntime;
+  try {
+    const s = agentSetup({ settle: { status: "settled", cost_eur: 0.0002, alerts_pending: true }, edgeRuntime: true });
+    const response = await s.visit();
+    assert.equal(response.status, 200);
+    assert.equal(edgeRuntime.tasks.length, 1, "la entrega se registra en EdgeRuntime");
+    await Promise.all(edgeRuntime.tasks);
+    assert.equal(s.resendPosts.length, 1);
+  } finally {
+    delete g.EdgeRuntime;
+  }
 });
 
 test("integración: sin alertas pendientes no se reclama nada", async () => {

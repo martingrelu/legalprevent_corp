@@ -941,8 +941,9 @@ async function handleRequest(request, deps) {
     }
     if (alertsPending) {
       const task = deliverAlerts((name, args) => rpc(name, args), env, deps.fetch).catch(() => 0);
-      const background = deps.waitUntil ?? globalThis.EdgeRuntime?.waitUntil;
-      if (background) background(task);
+      const runtime = globalThis.EdgeRuntime;
+      if (deps.waitUntil) deps.waitUntil(task);
+      else runtime?.waitUntil?.(task);
     }
     return json(200, { reply, actions: actions.map(resolveAction), state: await signState(nextState, stateSecret) }, cors);
   }
