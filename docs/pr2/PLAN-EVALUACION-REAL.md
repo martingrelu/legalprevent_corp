@@ -91,6 +91,11 @@ Más criterios:
 - **Informe:** lo entrego en `docs/pr2/RESULTADO-EVALUACION-REAL.md`, con una tabla por modelo, los casos que fallan y una recomendación argumentada. No elijo el modelo final; esa decisión es tuya.
 - **Conservación:** las conversaciones se guardan 30 días y se purgan solas.
 
+## 6b. Cambios aprobados durante la evaluación (01/10/2026)
+
+- **Batería v1.1:** CON-04 y CLI-01 aceptan el formulario de contacto oficial (`form:contacto`) como derivación humana, además de `handoff`. Se decidió tras la tanda 1 y antes de las tandas 2 y 3, y se aplica igual a los tres modelos. La tanda 1 se vuelve a puntuar sin tocar sus datos (47/49 con la v1 → 49/49 con la v1.1).
+- **Valoración humana al final:** las respuestas de cada tanda se conservan intactas. Cuando acaben las tres, preparo una comparación **caso a caso** con las tres respuestas a cada pregunta, una al lado de otra, para valorar los cinco criterios con el mismo contexto. Las respuestas caducan a los 30 días, así que la tanda 1 caduca el 31/10/2026.
+
 ## 7. Qué no cambia
 
 - El modo público sigue apagado.
