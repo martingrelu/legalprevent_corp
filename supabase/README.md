@@ -1,5 +1,9 @@
 # Legal Prevent + Supabase
 
+> Los runbooks de despliegue, los scripts de comprobación (`*-checks.sh`, `web-checks.sh`) y la
+> documentación interna están en el repositorio **privado** `legalprevent-ops` (`corp/runbooks/`,
+> `corp/checks/`). El empaquetado de `sales-agent` está en `tools/sales-agent-bundle.sh`.
+
 ## 1. Crear proyecto
 
 1. Entra en Supabase y crea un proyecto.
@@ -12,27 +16,27 @@
 5. Para comprobarla en una base de pruebas:
    `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f tests/sql/verify_pr0_migration.sql`
    (se ejecuta en una transacción con ROLLBACK).
-6. Despliegue en producción de PR0: sigue `supabase/deploy/PR0.md` (orden
+6. Despliegue en producción de PR0: sigue el runbook `PR0` (privado) (orden
    función → migración → web, comprobaciones y recuperación ante errores).
    Laboratorio local reproducible: `tests/lab/run.sh` (ver `tests/lab/README.md`).
 7. PR1a (límites de altas públicas, consentimiento con fecha y versión,
-   permisos mínimos): `supabase/deploy/PR1a.md`. La configuración operativa
+   permisos mínimos): el runbook `PR1a` (privado). La configuración operativa
    (límites, cabecera de IP) está en la tabla `private.settings`, que la API no
    expone.
 8. PR1b (contabilidad del agente: consumo, presupuesto de 25 €/mes con reserva
-   atómica y eventos anónimos): `supabase/deploy/PR1b.md`.
+   atómica y eventos anónimos): el runbook `PR1b` (privado).
 9. PR1c (conservación de 12 meses —desactivada hasta la validación jurídica—,
    supresión a petición del interesado y retirada del consentimiento
-   comercial desde el CRM): `supabase/deploy/PR1c.md`.
+   comercial desde el CRM): el runbook `PR1c` (privado).
 10. PR1d (webhook de Stripe `stripe-webhook`: firma con tolerancia de 5 min,
     API 2026-04-22, sin duplicados ni eventos desordenados, 500 si la base
-    falla): `supabase/deploy/PR1d.md`.
+    falla): el runbook `PR1d` (privado).
 11. PR1e (checkout `super-api` endurecido y después retirado —la web usa la
     plataforma para contratar—; retirada de `dynamic-endpoint` y `rapid-api`):
-    `supabase/deploy/PR1e.md`.
+    el runbook `PR1e` (privado).
 12. PR2 (agente comercial de IA, **solo modo privado**, no desplegado todavía):
     laboratorio en el CRM, proveedor OpenAI (store:false, sin herramientas) y
-    simulador. Diseño en `docs/pr2/`, despliegue en `supabase/deploy/PR2.md`.
+    simulador. Diseño y despliegue en la documentación interna (privada).
 
 ## 2. Crear usuario para el CRM
 
@@ -139,7 +143,7 @@ En la configuración de Supabase, deja `Verify JWT with legacy secret` en OFF pa
 La contratación **no** se hace en esta web: los botones de precios de
 legalprevent.com llevan a la plataforma (`https://legalprevent.legal/comprar?plan=…`),
 que crea la sesión de Stripe Checkout. La antigua función de checkout de esta
-web (`super-api`) se retiró el 25/09/2026 (ver `supabase/deploy/PR1e.md`).
+web (`super-api`) se retiró el 25/09/2026 (ver el runbook `PR1e` (privado)).
 
 Este proyecto solo **recibe** los eventos de Stripe de la cuenta (también los de
 las compras hechas en la plataforma) con la función `stripe-webhook` y los guarda
@@ -179,7 +183,7 @@ En la función `stripe-webhook` deja también la verificación JWT en OFF (Strip
 https://wtpfrlsbfishvworjdtr.supabase.co/functions/v1/stripe-webhook
 ```
 
-Eventos necesarios (sin `customer.subscription.updated` las suscripciones se quedan en `incomplete`; ver `supabase/deploy/PR1d.md`):
+Eventos necesarios (sin `customer.subscription.updated` las suscripciones se quedan en `incomplete`; ver el runbook `PR1d` (privado)):
 
 ```text
 checkout.session.completed

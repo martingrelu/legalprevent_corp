@@ -35,7 +35,7 @@ select * from (
   union all
   -- 5. Uso real tras PR0 (desde el despliegue, 2026-09-24 19:00 UTC).
   select 5, 'leads nuevos desde PR0', count(*)::text from public.leads where created_at >= '2026-09-24 19:00+00'
-  union all select 5, 'leads de prueba pr0 restantes', count(*)::text from public.leads where email like 'martingreluu+prueba-pr0%'
+  union all select 5, 'leads de prueba pr0 restantes', count(*)::text from public.leads where email like '%+prueba-pr0%'
   union all select 5, 'diagnostics totales', count(*)::text from public.diagnostics
   -- La web nueva envía privacyAccepted dentro del payload guardado; la antigua no.
   union all select 5, 'diagnostics web antigua (compatibilidad temporal) desde PR0',

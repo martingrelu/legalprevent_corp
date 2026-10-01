@@ -133,9 +133,9 @@ test("permisos efectivos tras PR1a", () => {
 
 test("pr0-snapshot.sql y pr1-inventory.sql se ejecutan en la réplica de producción sin modificar nada", () => {
   const before = psql("lab_old", "select md5(coalesce(string_agg(t::text, ','), '')) from (select * from public.leads order by id) t");
-  const snapshot = psqlFile("lab_old", `${ROOT}supabase/deploy/pr0-snapshot.sql`);
+  const snapshot = psqlFile("lab_old", `${ROOT}tests/lab/fixtures/pr0-snapshot.sql`);
   assert.match(snapshot, /postgres miembro de anon\|true/);
-  const inventory = psqlFile("lab_old", `${ROOT}supabase/deploy/pr1-inventory.sql`);
+  const inventory = psqlFile("lab_old", `${ROOT}tests/lab/fixtures/pr1-inventory.sql`);
   assert.match(inventory, /tabla payments\|rls=true anon=- auth=S /);
   assert.equal(psql("lab_old", "select md5(coalesce(string_agg(t::text, ','), '')) from (select * from public.leads order by id) t"), before);
 });
