@@ -7,7 +7,8 @@ import { handleRequest } from "../supabase/functions/sales-agent/index.ts";
 import { simulatedProvider, type ModelProvider, type GenerateRequest } from "../supabase/functions/sales-agent/providers.ts";
 import { validateOutput } from "../supabase/functions/sales-agent/validate.ts";
 import { canaryFor, signState, verifyState } from "../supabase/functions/sales-agent/state.ts";
-import { buildInstructions } from "../supabase/functions/sales-agent/prompt.ts";
+import { buildInput, buildInstructions, estimateTokens, maxInputTokens } from "../supabase/functions/sales-agent/prompt.ts";
+import { OUTPUT_SCHEMA } from "../supabase/functions/sales-agent/validate.ts";
 
 const SECRET = "secreto-de-prueba-de-al-menos-32-caracteres";
 const MODELS = {
@@ -108,7 +109,7 @@ test("2 · público ON: atraviesa los mismos controles (inyección, longitud, mo
   assert.doesNotMatch(body.reply, /(^|[^\d])99 €|30%/);
 
   // Límites del presupuesto público → fallback sin proveedor.
-  for (const reserve of ["session_limit", "daily_limit", "budget_exhausted", "disabled"]) {
+  for (const reserve of ["session_limit", "daily_limit", "hourly_limit", "budget_exhausted", "disabled"]) {
     s = setup({ reserve });
     body = await (await handleRequest(visit({ message: "¿Cuánto cuesta?" }), s.deps)).json();
     assert.equal(s.providerCalls(), 0, reserve);
@@ -307,4 +308,22 @@ test("privado sin cambios: el administrador sigue usando el laboratorio aunque e
   assert.equal(body.debug.model, "gpt-5.4-mini");
   assert.ok(rpcs.includes("agent_preview_reserve") && rpcs.includes("agent_preview_log_turn"));
   assert.ok(!rpcs.includes("agent_reserve") && !rpcs.includes("agent_track_event"));
+});
+
+test("PR2e · la reserva usa una COTA SUPERIOR estricta de tokens de entrada (bytes enviados + formato)", async () => {
+  const instructions = buildInstructions(await canaryFor(SECRET));
+  const bytes = (t: string) => new TextEncoder().encode(t).length;
+  const history = [{ r: "u" as const, x: "¿Cuánto cuesta el plan Pyme? Somos 30 empleados ñ€" }, { r: "a" as const, x: "Pyme 79 €/mes + IVA." }];
+  const input = buildInput(history, "Y el Business, ¿qué incluye? ✔️", 8);
+  const bound = maxInputTokens(instructions, input, OUTPUT_SCHEMA);
+  const sent = bytes(instructions) + bytes(JSON.stringify(input)) + bytes(JSON.stringify(OUTPUT_SCHEMA));
+  assert.ok(bound >= sent, "nunca por debajo de los bytes que recibe el modelo");
+  const rough = estimateTokens(instructions) + input.reduce((n, m) => n + estimateTokens(m.content), 0);
+  assert.ok(bound > rough * 2, `la cota (${bound}) es muy superior a la estimación orientativa (${rough})`);
+  // La función reserva con esa cota y con max_output_tokens.
+  const s = setup();
+  await handleRequest(visit({ message: "¿Cuánto cuesta?" }), s.deps);
+  const reserve = s.called("agent_reserve")[0].args;
+  assert.ok(reserve.p_max_input_tokens >= bytes(instructions), String(reserve.p_max_input_tokens));
+  assert.equal(reserve.p_max_output_tokens, 400);
 });

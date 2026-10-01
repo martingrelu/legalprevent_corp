@@ -53,6 +53,7 @@ export function renderAgentLab() {
       </section>
 
       ${lab.error ? `<p class="agent-lab-error" role="alert">${esc(lab.error)}</p>` : ""}
+      ${renderPublicBudget()}
 
       <div class="agent-lab-grid">
         <section class="panel agent-lab-chat">
@@ -128,6 +129,35 @@ function renderResults() {
           <td>${esc(r.fallbacks.join(", ") || "—")}</td><td>${euros(r.cost)}</td><td>${esc(r.latency)}</td>
         </tr>`).join("")}</tbody>
     </table>`;
+}
+
+// Presupuesto PÚBLICO (25 €/mes, PR2e): consumo del mes y alertas 50/80/100 %.
+// Solo cifras agregadas. El bloqueo al 100 % lo aplica la base de datos.
+// Textos aprobados en el Paso 0: mes con nombre y «1 de [mes siguiente]».
+const MONTH_NAMES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const monthName = (iso) => MONTH_NAMES[Number(String(iso || "").slice(5, 7)) - 1] ?? String(iso ?? "");
+const ALERT_TEXT = {
+  50: (b) => `Agente comercial · 50 % del presupuesto de ${monthName(b.month)}.`,
+  80: (b) => `Agente comercial · 80 % del presupuesto. Al llegar al 100 % responderá sin IA hasta el 1 de ${monthName(b.next_month)}.`,
+  100: (b) => `Presupuesto agotado. El agente responde sin IA hasta el 1 de ${monthName(b.next_month)}. Las conversaciones siguen ofreciendo diagnóstico, demo y contacto.`,
+};
+const EMAIL_STATUS = { pending: "email pendiente", sending: "email enviándose", sent: "email enviado", failed: "email fallido (se reintentará)" };
+function renderPublicBudget() {
+  const b = lab.summary?.public_budget;
+  if (!b) return "";
+  const pct = Math.min(100, (Number(b.spent_eur) / Math.max(Number(b.limit_eur), 0.0001)) * 100);
+  const top = (b.alerts || []).reduce((max, a) => (a.threshold > (max?.threshold ?? 0) ? a : max), null);
+  return `
+      <section class="panel agent-lab-public-budget">
+        <div class="agent-lab-budget">
+          <small>Presupuesto público · ${esc(monthName(b.month))} ${esc(String(b.month).slice(0, 4))}</small>
+          <strong>${euros(b.spent_eur)} de ${Number(b.limit_eur).toFixed(2)} € · ${pct.toFixed(1)} %</strong>
+          <div class="agent-lab-bar"><span style="width:${pct.toFixed(1)}%"></span></div>
+          <small>Llamadas hoy: ${esc(b.calls_today)} · modelo público: ${esc(b.model ?? "sin fijar")}${Number(b.reserved_eur) > 0 ? ` · reservado: ${euros(b.reserved_eur)}` : ""}</small>
+        </div>
+        ${top ? `<p class="agent-lab-alert agent-lab-alert-${esc(top.threshold)}" role="status"><strong>${esc(ALERT_TEXT[top.threshold]?.(b) ?? "")}</strong>
+          <small>${(b.alerts || []).map((a) => `${esc(a.threshold)} %: ${esc(EMAIL_STATUS[a.email_status] ?? a.email_status)}`).join(" · ")}</small></p>` : ""}
+      </section>`;
 }
 
 function renderSummary() {

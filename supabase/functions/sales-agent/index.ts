@@ -19,10 +19,11 @@
 // liquidación → registro (privado: turno; público: evento anónimo) → respuesta.
 // La clave del proveedor y la service role nunca salen de aquí.
 import { type Action, resolveAction } from "./actions.ts";
+import { deliverAlerts } from "./alerts.ts";
 import { AI_DISCLOSURE, fallbackReply, type FallbackReason } from "./fallback.ts";
 import { detectInjection } from "./guard.ts";
 import { KB } from "./kb.ts";
-import { buildInput, buildInstructions, estimateTokens } from "./prompt.ts";
+import { buildInput, buildInstructions, maxInputTokens } from "./prompt.ts";
 import {
   notEnabledProvider, openaiProvider, ProviderHttpError, ProviderNotEnabled, resolveEndpoint, simulatedProvider,
   type GenerateResult, type ModelProvider, type Usage,
@@ -32,7 +33,11 @@ import { type AgentState, canaryFor, newConversationId, signState, verifyState }
 import { OUTPUT_SCHEMA, validateOutput } from "./validate.ts";
 
 type Env = (name: string) => string | undefined;
-export type Deps = { env: Env; fetch: typeof fetch; provider?: ModelProvider; now?: () => number; timeoutMs?: number };
+export type Deps = {
+  env: Env; fetch: typeof fetch; provider?: ModelProvider; now?: () => number; timeoutMs?: number;
+  // Tareas en segundo plano (emails de alertas) que no deben retrasar la respuesta.
+  waitUntil?: (task: Promise<unknown>) => void;
+};
 
 type RuntimeConfig = {
   enabled: boolean; public_enabled: boolean; preview_enabled: boolean; region: string; default_model?: string | null;
@@ -209,7 +214,10 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       reserve: (maxIn: number, maxOut: number) =>
         rpc("agent_reserve", { p_session_id: state.c, p_max_input_tokens: maxIn, p_max_output_tokens: maxOut }),
       settle: (id: string, used: Usage, latency: number) =>
-        rpc("agent_settle", { p_reservation_id: id, p_input_tokens: used.input, p_output_tokens: used.output, p_latency_ms: latency }),
+        rpc("agent_settle", {
+          p_reservation_id: id, p_input_tokens: used.input, p_output_tokens: used.output, p_latency_ms: latency,
+          p_cached_tokens: Math.min(used.cached, used.input),
+        }),
       release: (id: string, latency: number) => rpc("agent_release", { p_reservation_id: id, p_latency_ms: latency }),
     }
     : {
@@ -225,22 +233,30 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       release: (id: string) => rpc("agent_preview_release", { p_reservation_id: id }),
     };
   const elapsed = () => (deps.now ? deps.now() : Date.now()) - started;
+  // Alertas del presupuesto público: si la base indica que hay emails
+  // pendientes, se envían en segundo plano; nunca afectan a la respuesta.
+  let alertsPending = false;
+  const noteAlerts = (result: unknown) => {
+    if (isPublic && (result as { alerts_pending?: boolean } | null)?.alerts_pending === true) alertsPending = true;
+  };
 
   if (!fallbackReason) {
     const instructions = buildInstructions(canary);
     const input = buildInput(state.t, redacted.text, config.max_history_turns);
-    const maxInput = estimateTokens(instructions) + input.reduce((n, m) => n + estimateTokens(m.content), 0);
+    // Cota superior estricta (no estimación): el coste real nunca supera la reserva.
+    const maxInput = maxInputTokens(instructions, input, OUTPUT_SCHEMA);
     let reservation: { status: string; reservation_id?: string };
     try {
       // La reserva va ANTES de cualquier contacto con el proveedor (también la
       // moderación): así el presupuesto y el cupo de llamadas reales lo cubren todo.
       reservation = await budget.reserve(maxInput, config.max_output_tokens);
+      noteAlerts(reservation);
     } catch {
       reservation = { status: "provider_error" };
     }
     if (reservation.status !== "reserved") {
       const known: FallbackReason[] = [
-        "disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted", "session_limit", "daily_limit",
+        "disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted", "session_limit", "daily_limit", "hourly_limit",
       ];
       fallback(known.includes(reservation.status as FallbackReason) ? reservation.status as FallbackReason : "provider_error");
     } else {
@@ -274,6 +290,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
         // Lo consumido se paga aunque la salida se rechace.
         try {
           const settled = await budget.settle(reservation.reservation_id as string, usage, elapsed());
+          noteAlerts(settled);
           costEur = Number(settled.cost_eur ?? 0);
         } catch {
           console.error("sales-agent: no se pudo liquidar la reserva");
@@ -317,6 +334,11 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       await rpc("agent_track_event", { p_event: { ...event, session_id: state.c, page_path: pagePath } }).catch(() => {
         console.error("sales-agent: no se pudo registrar el evento público");
       });
+    }
+    if (alertsPending) {
+      const task = deliverAlerts((name, args) => rpc(name, args), env, deps.fetch).catch(() => 0);
+      const background = deps.waitUntil ?? (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil;
+      if (background) background(task);
     }
     // Respuesta mínima: sin modelo, costes, tokens, filtros, errores ni debug.
     return json(200, { reply, actions: actions.map(resolveAction), state: await signState(nextState, stateSecret) }, cors);

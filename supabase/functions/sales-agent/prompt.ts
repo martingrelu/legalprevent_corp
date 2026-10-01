@@ -38,5 +38,21 @@ export function buildInput(history: Turn[], userText: string, maxTurns: number):
   ];
 }
 
-// Estimación prudente de tokens para reservar presupuesto (≈ 1 token / 3 caracteres).
+// Estimación orientativa de tokens (≈ 1 token / 3 caracteres). NO se usa para
+// reservar presupuesto: ver maxInputTokens.
 export const estimateTokens = (text: string) => Math.ceil(text.length / 3) + 16;
+
+// Cota SUPERIOR estricta de los tokens de entrada (PR2e). Todo lo que recibe el
+// modelo lo construye el servidor (instrucciones, historial firmado, mensaje y
+// esquema de salida); cada token del tokenizador representa al menos 1 byte
+// del texto, así que los tokens de entrada no pueden superar los bytes UTF-8
+// enviados (con el JSON de la petición, que además incluye escapes) más un
+// margen fijo para el formato de cada mensaje. Reservar con esta cota y con
+// max_output_tokens (límite duro del proveedor) garantiza coste real ≤ reserva.
+export const INPUT_FORMAT_OVERHEAD_TOKENS = 256;
+export const MESSAGE_FORMAT_OVERHEAD_TOKENS = 16;
+const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
+export function maxInputTokens(instructions: string, input: ModelMessage[], schema: unknown): number {
+  return utf8Bytes(instructions) + utf8Bytes(JSON.stringify(input)) + utf8Bytes(JSON.stringify(schema ?? null))
+    + INPUT_FORMAT_OVERHEAD_TOKENS + MESSAGE_FORMAT_OVERHEAD_TOKENS * (input.length + 1);
+}

@@ -6,7 +6,7 @@ import type { Action, Intent } from "./actions.ts";
 import { KB } from "./kb.ts";
 
 export type FallbackReason =
-  | "disabled" | "budget_exhausted" | "rate_limited" | "model_invalid" | "session_limit" | "daily_limit"
+  | "disabled" | "budget_exhausted" | "rate_limited" | "model_invalid" | "session_limit" | "daily_limit" | "hourly_limit"
   | "conversation_limit" | "message_too_long" | "injection" | "moderation" | "provider_error" | "timeout"
   | "invalid_output" | "refusal" | "region_unavailable" | "provider_not_enabled" | "allowance_exhausted";
 

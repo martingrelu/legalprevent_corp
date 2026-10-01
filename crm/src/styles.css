@@ -1399,3 +1399,10 @@ pre {
 .agent-lab .panel { min-width: 0; overflow-x: auto; }
 .agent-lab-grid > * { min-width: 0; }
 .agent-provider-error { color: #8a1c1c; margin-top: 4px; }
+
+/* PR2e · presupuesto público del agente y sus alertas */
+.agent-lab-public-budget { display: grid; gap: 10px; }
+.agent-lab-alert { margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid; display: grid; gap: 4px; }
+.agent-lab-alert-50 { background: #eff6ff; border-color: #bfdbfe; }
+.agent-lab-alert-80 { background: #fffbeb; border-color: #fde68a; }
+.agent-lab-alert-100 { background: #fef2f2; border-color: #fecaca; }
