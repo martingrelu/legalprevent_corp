@@ -337,8 +337,10 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     }
     if (alertsPending) {
       const task = deliverAlerts((name, args) => rpc(name, args), env, deps.fetch).catch(() => 0);
-      const background = deps.waitUntil ?? (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil;
-      if (background) background(task);
+      // Se llama como método para conservar el objeto EdgeRuntime (`this`).
+      const runtime = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+      if (deps.waitUntil) deps.waitUntil(task);
+      else runtime?.waitUntil?.(task);
     }
     // Respuesta mínima: sin modelo, costes, tokens, filtros, errores ni debug.
     return json(200, { reply, actions: actions.map(resolveAction), state: await signState(nextState, stateSecret) }, cors);
