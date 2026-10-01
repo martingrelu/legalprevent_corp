@@ -1,0 +1,53 @@
+# Publica en GitHub Pages SOLO los ficheros de .github/pages-allowlist.txt.
+# Lo que no está en la lista no se publica nunca, aunque esté en main.
+name: Publicar web (allowlist)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}            # sin permisos por defecto; cada job pide solo lo suyo
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read       # solo leer el repositorio
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Copiar la allowlist a _site (idéntica byte a byte, mismas rutas)
+        run: |
+          set -euo pipefail
+          while IFS= read -r f; do
+            [[ -z "$f" || "$f" == \#* ]] && continue
+            [[ "$f" != *..* && "$f" != /* ]] || { echo "::error::Ruta no permitida: $f"; exit 1; }
+            [[ -f "$f" ]] || { echo "::error::Falta en el repositorio: $f"; exit 1; }
+            install -D -m 0644 "$f" "_site/$f"
+          done < .github/pages-allowlist.txt
+          echo "Ficheros publicados:"
+          (cd _site && find . -type f | sort)
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write         # publicar en Pages
+      id-token: write      # requerido por deploy-pages (token OIDC)
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

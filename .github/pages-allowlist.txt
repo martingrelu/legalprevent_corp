@@ -1,0 +1,29 @@
+# Web pública
+index.html
+styles.css
+script.js
+aviso-legal/index.html
+politica-privacidad/index.html
+politica-cookies/index.html
+terminos-condiciones/index.html
+documentacion-legal/index.html
+gracias/index.html
+partner/index.html
+diagnostico/index.html
+diagnostico/diagnostico.js
+# Cliente Supabase (URL + clave anon, públicas por diseño)
+supabase-config.js
+supabase-bridge.js
+# CRM (acceso protegido por el login de Supabase)
+crm/index.html
+crm/src/app.js
+crm/src/agent-lab.js
+crm/src/csvImport.js
+crm/src/demoData.js
+crm/src/models.js
+crm/src/store.js
+crm/src/styles.css
+# Batería que carga el laboratorio del CRM (misma ruta que hoy)
+docs/pr2/eval/bateria-v1.json
+# Dominio (inofensivo; el dominio real lo fija Settings → Pages)
+CNAME
