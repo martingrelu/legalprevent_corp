@@ -1,7 +1,14 @@
 // Agente comercial de LegalPrevent (Edge Function `sales-agent`), PR2.
 //
-// En PR2 solo funciona el MODO PRIVADO (laboratorio del CRM, administradores):
-// el modo público responde 403 mientras agent.public_enabled sea false.
+// Dos modos con EL MISMO flujo de controles (no hay una segunda implementación):
+// - privado: laboratorio del CRM (JWT de administrador). Modelo elegido en el
+//   laboratorio, presupuesto de pruebas, turnos guardados 30 días, debug.
+// - público: visitantes de la web, solo si agent.public_enabled es true. Modelo
+//   decidido por el servidor (default_model), presupuesto público, conversación
+//   solo en el estado firmado (nada de texto en la base), eventos anónimos y
+//   respuesta mínima (sin modelo, costes, tokens, filtros ni errores).
+// Con public_enabled=false una petición pública recibe 403 antes de reservar
+// presupuesto o contactar con ningún proveedor.
 // Proveedor: AGENT_PROVIDER=openai (Responses API, store:false, sin
 // herramientas) o simulated (laboratorio). Sin proveedor válido → fallback.
 //
@@ -9,7 +16,7 @@
 // historial firmado → límites de conversación y longitud → redacción de datos
 // personales → detector de inyección → moderación → reserva de presupuesto →
 // modelo (timeout, sin herramientas, salida JSON) → validación de salida →
-// liquidación → registro del turno (solo privado) → respuesta.
+// liquidación → registro (privado: turno; público: evento anónimo) → respuesta.
 // La clave del proveedor y la service role nunca salen de aquí.
 import { type Action, resolveAction } from "./actions.ts";
 import { AI_DISCLOSURE, fallbackReply, type FallbackReason } from "./fallback.ts";
@@ -28,7 +35,7 @@ type Env = (name: string) => string | undefined;
 export type Deps = { env: Env; fetch: typeof fetch; provider?: ModelProvider; now?: () => number; timeoutMs?: number };
 
 type RuntimeConfig = {
-  enabled: boolean; public_enabled: boolean; preview_enabled: boolean; region: string;
+  enabled: boolean; public_enabled: boolean; preview_enabled: boolean; region: string; default_model?: string | null;
   models: Record<string, { in: number; cached_in: number; out: number; eu: boolean | null; api_model?: string }>;
   max_input_chars: number; max_output_tokens: number; max_history_turns: number;
 };
@@ -84,7 +91,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
 
   const raw = await request.text();
   if (raw.length > MAX_BODY) return json(413, { error: "Petición demasiado grande" }, cors);
-  let body: { message?: unknown; state?: unknown; model?: unknown; case_id?: unknown };
+  let body: { message?: unknown; state?: unknown; model?: unknown; case_id?: unknown; page?: unknown };
   try {
     body = JSON.parse(raw || "{}");
   } catch {
@@ -109,16 +116,25 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       tester = { admin: false, sub: null };
     }
   }
-  const preview = tester.admin === true;
-  if (!preview) {
-    // PR2: el modo público no existe todavía.
-    return json(403, { error: "El asistente no está disponible" }, cors);
-  }
-  if (!config.preview_enabled) return json(403, { error: "Laboratorio desactivado" }, cors);
+  // Modo: administrador → privado; si no, público solo con public_enabled.
+  // Sin modo válido → 403 ANTES de cualquier reserva o llamada a un proveedor.
+  const mode: "private" | "public" | null = tester.admin === true ? "private" : config.public_enabled === true ? "public" : null;
+  if (!mode) return json(403, { error: "El asistente no está disponible" }, cors);
+  if (mode === "private" && !config.preview_enabled) return json(403, { error: "Laboratorio desactivado" }, cors);
+  const isPublic = mode === "public";
 
-  const model = String(body.model ?? "");
-  if (!config.models?.[model]) return json(400, { error: "Modelo no permitido" }, cors);
-  const caseId = typeof body.case_id === "string" && /^[A-Z]{3}-\d{2}$/.test(body.case_id) ? body.case_id : null;
+  // Modelo: en público lo decide SOLO el servidor (default_model); lo que envíe
+  // el navegador se ignora. En privado lo elige el laboratorio, de la lista.
+  let model: string;
+  if (isPublic) {
+    model = typeof config.default_model === "string" ? config.default_model : "";
+  } else {
+    model = String(body.model ?? "");
+    if (!config.models?.[model]) return json(400, { error: "Modelo no permitido" }, cors);
+  }
+  const publicModelReady = !isPublic || Boolean(config.models?.[model]);
+  const caseId = !isPublic && typeof body.case_id === "string" && /^[A-Z]{3}-\d{2}$/.test(body.case_id) ? body.case_id : null;
+  const pagePath = typeof body.page === "string" && /^\/[A-Za-z0-9/_-]{0,120}$/.test(body.page) ? body.page : null;
 
   let state: AgentState;
   if (body.state) {
@@ -149,7 +165,8 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     ({ reply, intent, actions } = fallbackReply(redacted.text, reason));
   };
 
-  if (state.n >= MAX_TURNS_PER_CONVERSATION) fallback("conversation_limit");
+  if (!publicModelReady) fallback("disabled");
+  else if (state.n >= MAX_TURNS_PER_CONVERSATION) fallback("conversation_limit");
   else if (original.length > config.max_input_chars) fallback("message_too_long");
   else {
     const injection = detectInjection(redacted.text);
@@ -179,10 +196,35 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
   if (!fallbackReason && regionBlocked) fallback("region_unavailable");
   if (!fallbackReason && provider === notEnabledProvider) fallback("provider_not_enabled");
   const providerFailure = (error: unknown): FallbackReason => {
-    // Diagnóstico saneado (solo existe el modo privado en PR2; ver sanitizeProviderText).
+    // Diagnóstico saneado; solo llega al navegador en modo privado (ver sanitizeProviderText).
     if (error instanceof ProviderHttpError) filters.provider_error = error.info;
     return error instanceof ProviderNotEnabled ? "provider_not_enabled" : "provider_error";
   };
+
+  // Presupuesto según el modo: mismas fases (reservar → liquidar o liberar),
+  // distinto libro. Privado: presupuesto de pruebas y cupo de llamadas reales.
+  // Público: presupuesto público heredado (PR1b; su cálculo se revisa en PR2e).
+  const budget = isPublic
+    ? {
+      reserve: (maxIn: number, maxOut: number) =>
+        rpc("agent_reserve", { p_session_id: state.c, p_max_input_tokens: maxIn, p_max_output_tokens: maxOut }),
+      settle: (id: string, used: Usage, latency: number) =>
+        rpc("agent_settle", { p_reservation_id: id, p_input_tokens: used.input, p_output_tokens: used.output, p_latency_ms: latency }),
+      release: (id: string, latency: number) => rpc("agent_release", { p_reservation_id: id, p_latency_ms: latency }),
+    }
+    : {
+      reserve: (maxIn: number, maxOut: number) =>
+        rpc("agent_preview_reserve", {
+          p_conversation_id: state.c, p_model: model, p_max_input_tokens: maxIn, p_max_output_tokens: maxOut,
+          p_provider: provider.name,
+        }),
+      settle: (id: string, used: Usage) =>
+        rpc("agent_preview_settle", {
+          p_reservation_id: id, p_input_tokens: used.input, p_cached_tokens: Math.min(used.cached, used.input), p_output_tokens: used.output,
+        }),
+      release: (id: string) => rpc("agent_preview_release", { p_reservation_id: id }),
+    };
+  const elapsed = () => (deps.now ? deps.now() : Date.now()) - started;
 
   if (!fallbackReason) {
     const instructions = buildInstructions(canary);
@@ -192,15 +234,14 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     try {
       // La reserva va ANTES de cualquier contacto con el proveedor (también la
       // moderación): así el presupuesto y el cupo de llamadas reales lo cubren todo.
-      reservation = await rpc("agent_preview_reserve", {
-        p_conversation_id: state.c, p_model: model, p_max_input_tokens: maxInput, p_max_output_tokens: config.max_output_tokens,
-        p_provider: provider.name,
-      });
+      reservation = await budget.reserve(maxInput, config.max_output_tokens);
     } catch {
       reservation = { status: "provider_error" };
     }
     if (reservation.status !== "reserved") {
-      const known: FallbackReason[] = ["disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted"];
+      const known: FallbackReason[] = [
+        "disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted", "session_limit", "daily_limit",
+      ];
       fallback(known.includes(reservation.status as FallbackReason) ? reservation.status as FallbackReason : "provider_error");
     } else {
       try {
@@ -211,7 +252,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       }
     }
     if (reservation.status === "reserved" && fallbackReason) {
-      await rpc("agent_preview_release", { p_reservation_id: reservation.reservation_id }).catch(() => {});
+      await budget.release(reservation.reservation_id as string, elapsed()).catch(() => {});
     } else if (reservation.status === "reserved") {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -227,15 +268,12 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
         clearTimeout(timer);
       }
       if (!generated) {
-        await rpc("agent_preview_release", { p_reservation_id: reservation.reservation_id }).catch(() => {});
+        await budget.release(reservation.reservation_id as string, elapsed()).catch(() => {});
       } else {
         usage = generated.usage;
         // Lo consumido se paga aunque la salida se rechace.
         try {
-          const settled = await rpc("agent_preview_settle", {
-            p_reservation_id: reservation.reservation_id, p_input_tokens: usage.input,
-            p_cached_tokens: Math.min(usage.cached, usage.input), p_output_tokens: usage.output,
-          });
+          const settled = await budget.settle(reservation.reservation_id as string, usage, elapsed());
           costEur = Number(settled.cost_eur ?? 0);
         } catch {
           console.error("sales-agent: no se pudo liquidar la reserva");
@@ -267,6 +305,22 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     t: [...state.t, { r: "u" as const, x: redacted.text.slice(0, config.max_input_chars) }, { r: "a" as const, x: reply }]
       .slice(-config.max_history_turns * 2),
   };
+
+  if (isPublic) {
+    // Público: NUNCA se guarda el texto. Solo eventos anónimos (sin mensaje ni
+    // respuesta) para métricas agregadas; un fallo aquí no afecta al visitante.
+    const events: Array<Record<string, unknown>> = [];
+    if (firstTurn) events.push({ event_type: "conversation_started" });
+    events.push({ event_type: "message", intent });
+    if (fallbackReason) events.push({ event_type: "ai_fallback", target: fallbackReason });
+    for (const event of events) {
+      await rpc("agent_track_event", { p_event: { ...event, session_id: state.c, page_path: pagePath } }).catch(() => {
+        console.error("sales-agent: no se pudo registrar el evento público");
+      });
+    }
+    // Respuesta mínima: sin modelo, costes, tokens, filtros, errores ni debug.
+    return json(200, { reply, actions: actions.map(resolveAction), state: await signState(nextState, stateSecret) }, cors);
+  }
 
   try {
     await rpc("agent_preview_log_turn", {

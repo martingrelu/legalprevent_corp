@@ -15,10 +15,11 @@ const send = (body, token = AUTHENTICATED, origin = WEB) =>
   }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
 const agentCalls = async () => (await (await fetch(`${GATEWAY}/__lab/agent`)).json()).calls;
 const setAgent = (patch) => psql("lab", `update private.settings set value = value || '${JSON.stringify(patch)}'::jsonb where key = 'agent';`);
-const DEFAULTS = { preview_enabled: true, public_enabled: false, preview_budget_eur: 5, max_calls_per_minute: 20 };
+const DEFAULTS = { preview_enabled: true, public_enabled: false, default_model: null, preview_budget_eur: 5, max_calls_per_minute: 20 };
 
 beforeEach(async () => {
   psql("lab", `truncate private.agent_preview_ledger, private.agent_test_transcripts, private.agent_events;
+    delete from private.agent_usage; delete from private.agent_reservations; delete from private.agent_budget_months;
     delete from private.rate_counters where bucket like 'agent:%';`);
   setAgent(DEFAULTS);
   await fetch(`${GATEWAY}/__lab/reset`);
@@ -30,11 +31,15 @@ test("sin sesión de administrador del CRM no hay agente (modo público apagado)
     const r = await send({ message: "¿Cuánto cuesta?", model: "gpt-6-luna" }, token);
     assert.equal(r.status, 403, token.slice(0, 12));
   }
-  // Aunque alguien active public_enabled, PR2 no tiene modo público.
+  // Con public_enabled pero sin default_model (estado de producción hasta el
+  // lanzamiento): modo público con texto de respaldo, sin modelo ni reservas.
   setAgent({ public_enabled: true });
-  assert.equal((await send({ message: "hola", model: "gpt-6-luna" }, ANON)).status, 403);
+  const pub = await send({ message: "hola", model: "gpt-6-luna" }, ANON);
+  assert.equal(pub.status, 200);
+  assert.deepEqual(Object.keys(pub.body).sort(), ["actions", "reply", "state"]);
   assert.equal((await agentCalls()).length, 0);
   assert.equal(psql("lab", "select count(*) from private.agent_preview_ledger"), "0");
+  assert.equal(psql("lab", "select count(*) from private.agent_reservations"), "0");
 });
 
 test("conversación privada completa: identificación como IA, presupuesto de pruebas, turnos guardados y firmados", async () => {

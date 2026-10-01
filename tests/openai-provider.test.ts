@@ -54,6 +54,10 @@ function setup(opts: {
     if (name === "agent_preview_settle") return ok({ status: "settled", cost_eur: 0.00017 });
     if (name === "agent_preview_release") return ok({ status: "released" });
     if (name === "agent_preview_log_turn") return ok(1);
+    if (name === "agent_reserve") return ok({ status: "reserved", reservation_id: "pub-1" });
+    if (name === "agent_settle") return ok({ status: "settled", cost_eur: 0.0002 });
+    if (name === "agent_release") return ok({ status: "released" });
+    if (name === "agent_track_event") return ok({ ok: true });
     return ok({}, 404);
   }) as typeof fetch;
   const deps = { env: (k: string) => env[k], fetch: fakeFetch, timeoutMs: 500 };
@@ -249,4 +253,28 @@ test("respuesta normal: sin marca de negativa", async () => {
   const body = await (await handleRequest(ask("hola"), deps)).json();
   assert.equal(body.debug.filters.refusal, undefined);
   assert.equal(body.debug.filters.model_returned, null);
+});
+
+test("modo público (PR2d): misma petición segura a OpenAI con el modelo del servidor y respuesta mínima", async () => {
+  const { deps, openai, rpc } = setup({ config: { public_enabled: true, default_model: "gpt-6-luna" } });
+  const request = new Request("https://p.supabase.co/functions/v1/sales-agent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: "anon", Authorization: "Bearer anon", Origin: "https://legalprevent.com" },
+    body: JSON.stringify({ message: "Soy ana@empresa.es (612345678), ¿cuánto cuesta el Pyme?", model: "gpt-5.4-mini" }),
+  });
+  const response = await handleRequest(request, deps);
+  assert.equal(response.status, 200);
+  const text = await response.text();
+  assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ["actions", "reply", "state"]);
+  assert.doesNotMatch(text, /gpt-|debug|usage|cost|filters|eu\.api/);
+  const [moderation, generation] = openai;
+  assert.equal(moderation.url, "https://eu.api.openai.com/v1/moderations");
+  assert.equal(generation.body.model, "gpt-6-luna", "el modelo lo decide el servidor, no el navegador");
+  assert.equal(generation.body.store, false);
+  assert.equal(generation.body.tools, undefined);
+  assert.doesNotMatch(JSON.stringify(openai.map((c) => c.body)), /ana@empresa|612345678/);
+  assert.equal(rpc("agent_reserve").length, 1);
+  assert.equal(rpc("agent_settle").length, 1);
+  assert.equal(rpc("agent_preview_log_turn").length, 0);
+  assert.equal(rpc("agent_preview_reserve").length, 0);
 });

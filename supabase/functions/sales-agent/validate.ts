@@ -17,6 +17,7 @@ export const OUTPUT_SCHEMA = {
   },
 } as const;
 
+const UNEXPECTED_SCRIPT = /[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u;
 const ALLOWED_HOSTS = new Set(["legalprevent.com", "www.legalprevent.com", "legalprevent.legal"]);
 const MONEY = /(\d{1,3}(?:[.\s]\d{3})+|\d+)(?:,\d{1,2})?\s?(?:€|eur(?:os?)?\b)|(?:€|eur)\s?(\d{1,3}(?:[.\s]\d{3})+|\d+)/gi;
 const FORBIDDEN: Array<[string, RegExp]> = [
@@ -50,6 +51,10 @@ export function validateOutput(text: string, canary: string): { ok: boolean; out
   const reply = output.reply;
 
   if (!reply.trim() || reply.length > 1500) reasons.push("longitud");
+  // Solo alfabeto latino (con tildes y ñ), cifras, signos y emojis: cualquier
+  // otra escritura (cirílico, devanagari, árabe, CJK…) indica una salida
+  // degradada del modelo (incidente de la evaluación del 01/10/2026).
+  if (UNEXPECTED_SCRIPT.test(reply)) reasons.push("alfabeto_inesperado");
   if (output.actions.length > 4) reasons.push("demasiadas_acciones");
   if (reply.includes(canary) || /LP-CANARY-/i.test(reply)) reasons.push("filtracion_instrucciones");
 
