@@ -7,7 +7,7 @@ Reproduce en local, sin tocar producción, el entorno de captación de leads:
 - **Dos bases**: `lab_old` (esquema publicado en `origin/main` más los cambios
   que ya existen en producción y aún no estaban en el repositorio —`PROD_DRIFT`
   en `run.sh`—: reproduce producción) y `lab` (`lab_old` + las migraciones de la
-  rama). Comparado con el inventario real (`supabase/deploy/pr1-inventory.sql`):
+  rama). Comparado con el inventario real (`tests/lab/fixtures/pr1-inventory.sql`):
   0 diferencias en tablas, permisos, políticas y funciones.
 - **`auth.jwt()` emulado** (`sql/02_auth.sql`): las políticas "CRM admin" y
   `is_crm_admin()` se comportan como en producción (`app_metadata.crm_role`).
@@ -69,7 +69,7 @@ Elimina contenedores y red.
 | `stripe.lab.mjs` | Webhook (service role) sigue escribiendo; `anon` sin acceso; el CRM administrador solo lee. |
 
 Con `--serve` también se pueden ensayar las comprobaciones de despliegue
-(`supabase/deploy/pr0-checks.sh`) en cada estado, cambiando el escenario con
+(`corp/checks/pr0-checks.sh`, en el repositorio privado `legalprevent-ops`) en cada estado, cambiando el escenario con
 `/__lab/mode` (la salida de `--serve` indica la orden exacta).
 
 ## Limitaciones

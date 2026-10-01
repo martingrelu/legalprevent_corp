@@ -132,6 +132,6 @@ if [[ "$SERVE" == "1" ]]; then
   (cd "$LAB" && node -e 'import("./jwt.mjs").then((j) => console.log(`  anon:          ${j.ANON}\n  authenticated: ${j.AUTHENTICATED}`))')
   echo
   echo "Comprobaciones de despliegue contra el laboratorio:"
-  echo "  PR0_BASE=http://127.0.0.1:$LAB_GATEWAY_PORT PR0_SITE=http://127.0.0.1:8766 PR0_KEY=<anon> supabase/deploy/pr0-checks.sh after-migration"
+  echo "  PR0_BASE=http://127.0.0.1:$LAB_GATEWAY_PORT PR0_SITE=http://127.0.0.1:8766 PR0_KEY=<anon> LP_CORP_ROOT=$ROOT <legalprevent-ops>/corp/checks/pr0-checks.sh after-migration"
   wait "$GATEWAY_PID"
 fi

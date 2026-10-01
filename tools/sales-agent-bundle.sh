@@ -4,7 +4,7 @@
 # misma batería del proveedor real (OpenAI simulado, sin llamadas reales).
 # esbuild se ejecuta con versión fija vía npx; no se añade al proyecto.
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/supabase/functions/sales-agent/dist/sales-agent.bundle.js"
 mkdir -p "$(dirname "$OUT")"
 npx --yes esbuild@0.24.0 "$ROOT/supabase/functions/sales-agent/index.ts" \
