@@ -30,6 +30,8 @@ const stripeWebhook = (await import("../../supabase/functions/stripe-webhook/ind
 const salesAgent = (await import("../../supabase/functions/sales-agent/index.ts")).handleRequest;
 const { simulatedProvider } = await import("../../supabase/functions/sales-agent/providers.ts");
 const agentCalls = [];
+// Tareas en segundo plano del agente (emails de alertas): /__lab/agent/flush las espera.
+const agentBackground = [];
 const agentProvider = simulatedProvider({ onCall: (request) => agentCalls.push({ model: request.model, input: request.input }) });
 
 // ---- Resend simulado, con la semántica de idempotencia documentada ----
@@ -91,6 +93,11 @@ http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/__lab/emails") return res.end(JSON.stringify({ delivered: resend.delivered, attempts: resend.attempts }));
     if (url.pathname === "/__lab/agent") return res.end(JSON.stringify({ calls: agentCalls }));
+    if (url.pathname === "/__lab/agent/flush") {
+      const tasks = agentBackground.splice(0);
+      await Promise.allSettled(tasks);
+      return res.end(JSON.stringify({ flushed: tasks.length }));
+    }
     if (url.pathname === "/__lab/reset") {
       agentCalls.length = 0;
       Object.assign(resend, { mode: "ok", delivered: [], attempts: [] });
@@ -121,7 +128,7 @@ http.createServer(async (req, res) => {
         headers: req.headers,
         body: ["GET", "HEAD", "OPTIONS"].includes(req.method) ? undefined : body,
       });
-      const response = await salesAgent(request, { env: (k) => env[k], fetch, provider: agentProvider });
+      const response = await salesAgent(request, { env: (k) => env[k], fetch: labFetch, provider: agentProvider, waitUntil: (task) => agentBackground.push(task) });
       res.writeHead(response.status, Object.fromEntries(response.headers));
       return res.end(Buffer.from(await response.arrayBuffer()));
     }

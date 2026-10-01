@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, VERIFY_PR1E, VERIFY_PR2, psql, psqlFile, reset } from "./helpers.mjs";
+import { ROOT, VERIFY_PR1A, VERIFY_PR1B, VERIFY_PR1C, VERIFY_PR1D, VERIFY_PR1E, VERIFY_PR2, VERIFY_PR2E, psql, psqlFile, reset } from "./helpers.mjs";
 
 const PR1A = [
   `${ROOT}supabase/migrations/20260925_crm_admin_policies.sql`,
@@ -147,7 +147,14 @@ const PR1B = `${ROOT}supabase/migrations/20260926_agent_budget.sql`;
 const PR1B_ROLLBACK = `${ROOT}supabase/rollback/20260926_agent_budget_down.sql`;
 const verifyPr1b = () => result("lab", VERIFY_PR1B);
 
+// PR2e (20261002) sustituye las funciones públicas de PR1b. Para probar PR1b tal
+// cual se vuelve antes a su estado con el rollback de PR2e; el bloque de PR2e
+// (al final) vuelve a aplicar PR2e.
+const PR2E = `${ROOT}supabase/migrations/20261002_agent_public_budget.sql`;
+const PR2E_ROLLBACK = `${ROOT}supabase/rollback/20261002_agent_public_budget_down.sql`;
+
 test("la migración de PR1b se puede reaplicar y verify_pr1b_migration.sql supera todos los bloques", () => {
+  psqlFile("lab", PR2E_ROLLBACK);
   psqlFile("lab", PR1B);
   psqlFile("lab", PR1B);
   assert.equal(verifyPr1b(), "OK: verificación PR1b superada");
@@ -387,4 +394,69 @@ test("rollback de PR2: retira funciones, conserva el libro de gasto y se puede r
     psql("lab", "delete from private.agent_preview_ledger where conversation_id = 'rollback-pr2-000000001';");
   }
   assert.equal(verifyPr2(), "OK: verificación PR2 superada");
+});
+
+// ---------------------------------------------------------------------------
+// PR2e · presupuesto público por modelo, tope por minuto y alertas
+// ---------------------------------------------------------------------------
+const verifyPr2e = () => result("lab", VERIFY_PR2E);
+
+test("la migración de PR2e se puede reaplicar y verify_pr2e_public_budget.sql supera todos los bloques", () => {
+  psqlFile("lab", PR2E);
+  psqlFile("lab", PR2E);
+  assert.equal(verifyPr2e(), "OK: verificación PR2e superada");
+  assert.equal(verifyPr2(), "OK: verificación PR2 superada", "PR2e no rompe el laboratorio privado");
+  assert.equal(verifyPr1a(), "OK: verificación PR1a superada");
+  assert.equal(psql("lab", "select count(*) from pg_proc where proname = 'agent_settle' and pronamespace = 'public'::regnamespace"), "1", "sin sobrecargas ambiguas");
+});
+
+test("el verificador de PR2e detecta vulnerabilidades y errores reintroducidos", () => {
+  psql("lab", "grant execute on function public.agent_reserve(text,integer,integer) to anon;");
+  try {
+    assert.match(verifyPr2e(), /FALLO: anon pudo reservar presupuesto público/);
+  } finally {
+    psql("lab", "revoke execute on function public.agent_reserve(text,integer,integer) from anon;");
+  }
+  withFunctionMutation("public.agent_reserve(text,integer,integer)",
+    "if v_row.spent_eur + v_row.reserved_eur + v_estimate > v_budget then",
+    "if false then", () =>
+      assert.match(verifyPr2e(), /FALLO: reservó por encima de 25 €/));
+  withFunctionMutation("public.agent_reserve(text,integer,integer)",
+    "* greatest(coalesce((v_config ->> 'public_reserve_margin')::numeric, 1.25), 1), 6);",
+    ", 6);", () =>
+      assert.match(verifyPr2e(), /FALLO: reserva mal calculada/));
+  withFunctionMutation("public.agent_reserve(text,integer,integer)",
+    "if not private.rate_hit('agent:public:minute'",
+    "if false and not private.rate_hit('agent:public:minute'", () =>
+      assert.match(verifyPr2e(), /FALLO: no aplicó el tope por minuto/));
+  withFunctionMutation("private.agent_raise_alerts(date,numeric,numeric,jsonb,boolean)",
+    "on conflict (month, threshold) do nothing;",
+    "on conflict (month, threshold) do update set triggered_at = now(), email_status = 'pending';", () =>
+      assert.match(verifyPr2e(), /FALLO: (se volvió a reclamar una alerta ya enviada|los umbrales no se registran)/));
+  withFunctionMutation("public.agent_alerts_claim(integer)",
+    "where a.email_attempts < 10",
+    "where true", () =>
+      assert.match(verifyPr2e(), /FALLO: (reintentó sin límite|una alerta en envío se reclamó dos veces|el reintento no cogió solo la fallida)/));
+  withFunctionMutation("public.agent_lab_summary()",
+    "if not public.is_crm_admin() then", "if false then", () =>
+      assert.match(verifyPr2e(), /FALLO: un usuario sin rol de administrador vio el presupuesto/));
+  assert.equal(verifyPr2e(), "OK: verificación PR2e superada");
+});
+
+test("rollback de PR2e: vuelve a PR1b, conserva datos y alertas y se puede reaplicar", () => {
+  psql("lab", `insert into private.agent_budget_alerts (month, threshold, spent_eur, budget_eur) values (date '2026-01-01', 50, 12.5, 25);
+    insert into private.agent_budget_months (month, spent_eur) values (date '2026-01-01', 12.5) on conflict do nothing;`);
+  try {
+    psqlFile("lab", PR2E_ROLLBACK);
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname in ('agent_alerts_claim','agent_alert_result','agent_raise_alerts','agent_public_model')"), "0");
+    assert.equal(psql("lab", "select pg_get_function_identity_arguments('public.agent_settle'::regproc)"), "p_reservation_id uuid, p_input_tokens integer, p_output_tokens integer, p_latency_ms integer");
+    assert.equal(psql("lab", "select count(*) from private.agent_budget_alerts where month = date '2026-01-01'"), "1", "conserva las alertas");
+    assert.equal(psql("lab", "select (value ? 'public_max_calls_per_minute')::text from private.settings where key = 'agent'"), "false");
+    assert.equal(verifyPr1b(), "OK: verificación PR1b superada", "tras el rollback funciona el presupuesto de PR1b");
+    assert.equal(verifyPr2(), "OK: verificación PR2 superada");
+  } finally {
+    psqlFile("lab", PR2E);
+    psql("lab", "delete from private.agent_budget_alerts where month = date '2026-01-01'; delete from private.agent_budget_months where month = date '2026-01-01';");
+  }
+  assert.equal(verifyPr2e(), "OK: verificación PR2e superada");
 });

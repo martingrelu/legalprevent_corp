@@ -196,6 +196,77 @@ function resolveAction(id) {
   return { id, label: `Contratar ${PLAN_NAMES[plan]}`, url: ENLACES.comprar(plan) };
 }
 
+// supabase/functions/sales-agent/alerts.ts
+var MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+var eur = (n) => `${Number(n || 0).toFixed(2).replace(".", ",")} \u20AC`;
+var monthName = (yyyyMm) => MONTHS[Number(yyyyMm.slice(5, 7)) - 1] ?? yyyyMm;
+var nextMonthName = (yyyyMmDd) => `1 de ${MONTHS[Number(yyyyMmDd.slice(5, 7)) - 1] ?? yyyyMmDd}`;
+function buildAlertEmail(alert) {
+  const mes = monthName(alert.month);
+  const gastado = `${eur(alert.spent_eur)} de ${eur(alert.budget_eur)}`;
+  const proyeccion = alert.projection_eur === null ? "" : ` Proyecci\xF3n a fin de mes: ${eur(alert.projection_eur)}.`;
+  const hasta = nextMonthName(alert.next_month);
+  if (alert.threshold >= 100) {
+    return {
+      subject: `[LegalPrevent] Agente comercial: presupuesto de ${mes} agotado; respuestas sin IA activas`,
+      text: [
+        `El agente comercial ha alcanzado el l\xEDmite del presupuesto p\xFAblico de ${mes} (${gastado}).`,
+        `Desde ahora responde sin IA (texto fijo con diagn\xF3stico, demo y contacto) hasta el ${hasta}.`,
+        `Llamadas hoy: ${alert.calls_today}. Detalle en el CRM \u2192 Agente IA.`,
+        "Ampliar el presupuesto requiere un cambio de configuraci\xF3n autorizado."
+      ].join("\n")
+    };
+  }
+  return {
+    subject: `[LegalPrevent] Agente comercial: ${alert.threshold} % del presupuesto de ${mes}`,
+    text: [
+      `El agente comercial ha consumido ${gastado} del presupuesto p\xFAblico de ${mes} (${alert.threshold} %).${proyeccion}`,
+      `Llamadas hoy: ${alert.calls_today}.`,
+      alert.threshold >= 80 ? `Si se alcanza el 100 %, responder\xE1 sin IA (texto fijo con diagn\xF3stico, demo y contacto) hasta el ${hasta}.` : "No hay que hacer nada; es un aviso informativo.",
+      "Detalle en el CRM \u2192 Agente IA. Este aviso se env\xEDa una vez por umbral y mes."
+    ].join("\n")
+  };
+}
+async function deliverAlerts(rpc, env, fetchFn) {
+  const apiKey = env("RESEND_API_KEY");
+  const from = env("FROM_EMAIL");
+  const to = env("AGENT_ALERT_EMAIL") || env("LEAD_NOTIFY_EMAIL");
+  if (!apiKey || !from || !to) return 0;
+  let claims;
+  try {
+    claims = await rpc("agent_alerts_claim", { p_lease_seconds: 600 });
+  } catch {
+    return 0;
+  }
+  let sent = 0;
+  for (const alert of claims ?? []) {
+    const { subject, text } = buildAlertEmail(alert);
+    let ok = false;
+    let error = null;
+    try {
+      const response = await fetchFn("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `agent-budget-alert/${alert.month}/${alert.threshold}`
+        },
+        body: JSON.stringify({ from, to: [to], subject, text })
+      });
+      ok = response.ok;
+      if (!ok) error = `http_${response.status}`;
+    } catch {
+      error = "network";
+    }
+    try {
+      await rpc("agent_alert_result", { p_month: alert.month, p_threshold: alert.threshold, p_ok: ok, p_error: error });
+    } catch {
+    }
+    if (ok) sent += 1;
+  }
+  return sent;
+}
+
 // supabase/functions/sales-agent/fallback.ts
 var PARTNER = /\b(gestor[ií]a|asesor[ií]a|despacho|cartera de clientes|mis clientes|varias empresas|muchas empresas|empresas cliente|llevo la (contabilidad|gesti[oó]n))\b/i;
 function intentByRules(message) {
@@ -734,7 +805,13 @@ async function handleRequest(request, deps) {
   };
   const budget = isPublic ? {
     reserve: (maxIn, maxOut) => rpc("agent_reserve", { p_session_id: state.c, p_max_input_tokens: maxIn, p_max_output_tokens: maxOut }),
-    settle: (id, used, latency) => rpc("agent_settle", { p_reservation_id: id, p_input_tokens: used.input, p_output_tokens: used.output, p_latency_ms: latency }),
+    settle: (id, used, latency) => rpc("agent_settle", {
+      p_reservation_id: id,
+      p_input_tokens: used.input,
+      p_output_tokens: used.output,
+      p_latency_ms: latency,
+      p_cached_tokens: Math.min(used.cached, used.input)
+    }),
     release: (id, latency) => rpc("agent_release", { p_reservation_id: id, p_latency_ms: latency })
   } : {
     reserve: (maxIn, maxOut) => rpc("agent_preview_reserve", {
@@ -753,6 +830,10 @@ async function handleRequest(request, deps) {
     release: (id) => rpc("agent_preview_release", { p_reservation_id: id })
   };
   const elapsed = () => (deps.now ? deps.now() : Date.now()) - started;
+  let alertsPending = false;
+  const noteAlerts = (result) => {
+    if (isPublic && result?.alerts_pending === true) alertsPending = true;
+  };
   if (!fallbackReason) {
     const instructions = buildInstructions(canary);
     const input = buildInput(state.t, redacted.text, config.max_history_turns);
@@ -760,6 +841,7 @@ async function handleRequest(request, deps) {
     let reservation;
     try {
       reservation = await budget.reserve(maxInput, config.max_output_tokens);
+      noteAlerts(reservation);
     } catch {
       reservation = { status: "provider_error" };
     }
@@ -811,6 +893,7 @@ async function handleRequest(request, deps) {
         usage = generated.usage;
         try {
           const settled = await budget.settle(reservation.reservation_id, usage, elapsed());
+          noteAlerts(settled);
           costEur = Number(settled.cost_eur ?? 0);
         } catch {
           console.error("sales-agent: no se pudo liquidar la reserva");
@@ -849,6 +932,11 @@ async function handleRequest(request, deps) {
       await rpc("agent_track_event", { p_event: { ...event, session_id: state.c, page_path: pagePath } }).catch(() => {
         console.error("sales-agent: no se pudo registrar el evento p\xFAblico");
       });
+    }
+    if (alertsPending) {
+      const task = deliverAlerts((name, args) => rpc(name, args), env, deps.fetch).catch(() => 0);
+      const background = deps.waitUntil ?? globalThis.EdgeRuntime?.waitUntil;
+      if (background) background(task);
     }
     return json(200, { reply, actions: actions.map(resolveAction), state: await signState(nextState, stateSecret) }, cors);
   }

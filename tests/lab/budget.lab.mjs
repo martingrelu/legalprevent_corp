@@ -1,43 +1,50 @@
-// Contabilidad del agente (PR1b) con peticiones concurrentes reales a través
-// de PostgREST (pool de conexiones independientes), como las hará la Edge
-// Function del agente con la service role.
+// Contabilidad del presupuesto PÚBLICO del agente (PR1b, recalculada por
+// modelo en PR2e) con peticiones concurrentes reales a través de PostgREST
+// (pool de conexiones independientes), como las hará la Edge Function.
 import { test, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { ANON, AUTHENTICATED, AUTHENTICATED_NO_ADMIN } from "./jwt.mjs";
 import { psql, rpc, service, tally } from "./helpers.mjs";
 
-// 1 € al mes; 10 €/Mtok de entrada y 20 €/Mtok de salida: una reserva de
-// 10.000 tokens de entrada cuesta exactamente 0,10 €.
+// 1 € al mes; modelo de laboratorio a 10 €/Mtok de entrada y 20 €/Mtok de
+// salida (usd_eur 1, margen 1): una reserva de 10.000 tokens de entrada cuesta
+// exactamente 0,10 €. Desde PR2e el coste sale de la tabla por modelo.
+const LAB_MODEL = { "lab-10-20": { in: 10, cached_in: 1, out: 20, eu: null } };
 const BASE_CONFIG = {
   enabled: true,
   monthly_budget_eur: 1,
   alert_thresholds_pct: [50, 80, 100],
-  price_input_eur_per_mtok: 10,
-  price_output_eur_per_mtok: 20,
+  default_model: "lab-10-20",
+  usd_eur: 1,
+  public_reserve_margin: 1,
+  public_max_calls_per_minute: 100000,
   max_messages_per_session: 1000,
   max_calls_per_day: 100000,
   reservation_ttl_minutes: 10,
 };
 
 function configure(overrides = {}) {
-  psql("lab", `update private.settings set value = value || '${JSON.stringify({ ...BASE_CONFIG, ...overrides })}'::jsonb where key = 'agent';`);
+  psql("lab", `update private.settings set value = value || '${JSON.stringify({ ...BASE_CONFIG, ...overrides })}'::jsonb
+    || jsonb_build_object('models', (value -> 'models') || '${JSON.stringify(LAB_MODEL)}'::jsonb) where key = 'agent';`);
 }
 const month = () => psql("lab", "select spent_eur || '|' || reserved_eur from private.agent_budget_months where month = private.agent_month()");
 const session = (i) => `lab-sesion-${String(i).padStart(6, "0")}`;
 const reserve = (s, input = 10000, output = 0) =>
   service("agent_reserve", { p_session_id: s, p_max_input_tokens: input, p_max_output_tokens: output });
 
-// Al terminar se restauran los valores de la migración de PR1b (los comprueban
-// los verificadores posteriores).
-after(() => configure({
-  enabled: true, monthly_budget_eur: 25, alert_thresholds_pct: [50, 80, 100],
-  price_input_eur_per_mtok: 0.37, price_output_eur_per_mtok: 1.48,
+// Al terminar se restauran los valores de las migraciones (los comprueban los
+// verificadores posteriores): sin modelo de laboratorio ni modelo público.
+after(() => psql("lab", `update private.settings set value = (value || '${JSON.stringify({
+  enabled: true, monthly_budget_eur: 25, alert_thresholds_pct: [50, 80, 100], default_model: null, usd_eur: 0.9,
+  public_reserve_margin: 1.25, public_max_calls_per_minute: 20,
   max_messages_per_session: 12, max_calls_per_day: 600, reservation_ttl_minutes: 10,
-}));
+})}'::jsonb) || jsonb_build_object('models', (value -> 'models') - 'lab-10-20') where key = 'agent';
+  delete from private.agent_budget_alerts; delete from private.rate_counters where bucket like 'agent:%';`));
 
 beforeEach(() => {
   psql("lab", `delete from private.agent_usage; delete from private.agent_reservations;
-    delete from private.agent_budget_months; delete from private.agent_events;`);
+    delete from private.agent_budget_months; delete from private.agent_events; delete from private.agent_budget_alerts;
+    delete from private.rate_counters where bucket like 'agent:%';`);
   configure();
 });
 
@@ -51,7 +58,9 @@ test("sin el advisory lock el presupuesto se supera (el bloqueo es necesario)", 
   const sig = "public.agent_reserve(text,integer,integer)";
   psql("lab", `create table _lab_budget_bak as select pg_get_functiondef('${sig}'::regprocedure) body;
     do $m$ declare v text; begin
-      select replace(body, $f$perform pg_advisory_xact_lock(hashtext('legalprevent.agent_budget'));$f$, 'perform pg_sleep(0.05);') into v from _lab_budget_bak;
+      -- Desde PR2e el contador por minuto (una fila) también serializa: se quitan ambos.
+      select replace(replace(body, $f$perform pg_advisory_xact_lock(hashtext('legalprevent.agent_budget'));$f$, 'perform pg_sleep(0.05);'),
+                     $f$if not private.rate_hit('agent:public:minute'$f$, $f$if false and not private.rate_hit('agent:public:minute'$f$) into v from _lab_budget_bak;
       if v = (select body from _lab_budget_bak) then raise exception 'mutación no aplicada'; end if;
       execute v; end $m$;`);
   try {
@@ -82,9 +91,13 @@ test("alertas de consumo: cada umbral se avisa una sola vez aunque las liquidaci
   const ids = (await Promise.all(Array.from({ length: 10 }, (_, i) => reserve(session(i))))).map((r) => r.reservation_id);
   const results = await Promise.all(ids.map((id) =>
     service("agent_settle", { p_reservation_id: id, p_input_tokens: 10000, p_output_tokens: 0 })));
-  const alerts = results.flatMap((r) => r.new_alerts_pct).sort((a, b) => a - b);
-  assert.deepEqual(alerts, [50, 80, 100]);
+  assert.ok(results.every((r) => r.status === "settled"));
+  assert.equal(psql("lab", "select string_agg(threshold || ':' || email_status, ',' order by threshold) from private.agent_budget_alerts"),
+    "50:pending,80:pending,100:pending");
   assert.equal(month(), "1.000000|0.000000");
+  // Agotado: la siguiente reserva se rechaza y no se duplica la alerta del 100 %.
+  assert.equal((await reserve(session(99))).status, "budget_exhausted");
+  assert.equal(psql("lab", "select count(*) from private.agent_budget_alerts"), "3");
 });
 
 test("límite por sesión con 50 peticiones simultáneas de la misma sesión: exactamente 12", async () => {
@@ -131,4 +144,41 @@ test("los eventos rechazan datos personales y texto libre", async () => {
     assert.ok(out.code || out.message, `debía rechazarse: ${JSON.stringify(event)}`);
   }
   assert.equal(psql("lab", "select count(*) from private.agent_events"), "0");
+});
+
+test("PR2e · coste por modelo: reserva conservadora (sin caché, con margen) y liquidación con el uso real", async () => {
+  configure({ public_reserve_margin: 1.5 });
+  const r = await reserve(session(1), 10000, 1000);
+  // (10.000 × 10 + 1.000 × 20) / 1e6 = 0,12 € × 1,5 = 0,18 €
+  assert.equal(r.status, "reserved");
+  assert.equal(Number(r.max_cost_eur), 0.18);
+  assert.equal(r.model, "lab-10-20");
+  const settled = await service("agent_settle", { p_reservation_id: r.reservation_id, p_input_tokens: 8000, p_output_tokens: 500, p_cached_tokens: 6000 });
+  // (2.000 × 10 + 6.000 × 1 + 500 × 20) / 1e6 = 0,036 €
+  assert.equal(Number(settled.cost_eur), 0.036);
+  assert.equal(month(), "0.036000|0.000000");
+});
+
+test("PR2e · tope global por minuto con 60 peticiones simultáneas de sesiones distintas: exactamente 15", async () => {
+  configure({ public_max_calls_per_minute: 15 });
+  const out = await Promise.all(Array.from({ length: 60 }, (_, i) => reserve(session(i), 10, 10)));
+  assert.deepEqual(tally(out.map((r) => r.status)), { reserved: 15, rate_limited: 45 });
+});
+
+test("PR2e · concurrencia cerca del límite: nunca se reserva por encima de 25 € (escala real)", async () => {
+  configure({ monthly_budget_eur: 25 });
+  psql("lab", "insert into private.agent_budget_months (month, spent_eur) values (private.agent_month(), 24.5)");
+  // Cada reserva: 10.000 tokens → 0,10 €; caben exactamente 5.
+  const out = await Promise.all(Array.from({ length: 100 }, (_, i) => reserve(session(i))));
+  assert.deepEqual(tally(out.map((r) => r.status)), { reserved: 5, budget_exhausted: 95 });
+  assert.equal(month(), "24.500000|0.500000");
+  assert.equal(psql("lab", "select count(*) from private.agent_budget_alerts where threshold = 100"), "1");
+});
+
+test("PR2e · sin modelo público válido no se reserva nada", async () => {
+  configure({ default_model: null });
+  assert.equal((await reserve(session(1))).status, "disabled");
+  configure({ default_model: "gpt-4o" });
+  assert.equal((await reserve(session(1))).status, "disabled");
+  assert.equal(psql("lab", "select count(*) from private.agent_reservations"), "0");
 });
