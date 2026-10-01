@@ -23,7 +23,7 @@ import { deliverAlerts } from "./alerts.ts";
 import { AI_DISCLOSURE, fallbackReply, type FallbackReason } from "./fallback.ts";
 import { detectInjection } from "./guard.ts";
 import { KB } from "./kb.ts";
-import { buildInput, buildInstructions, estimateTokens } from "./prompt.ts";
+import { buildInput, buildInstructions, maxInputTokens } from "./prompt.ts";
 import {
   notEnabledProvider, openaiProvider, ProviderHttpError, ProviderNotEnabled, resolveEndpoint, simulatedProvider,
   type GenerateResult, type ModelProvider, type Usage,
@@ -243,7 +243,8 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
   if (!fallbackReason) {
     const instructions = buildInstructions(canary);
     const input = buildInput(state.t, redacted.text, config.max_history_turns);
-    const maxInput = estimateTokens(instructions) + input.reduce((n, m) => n + estimateTokens(m.content), 0);
+    // Cota superior estricta (no estimación): el coste real nunca supera la reserva.
+    const maxInput = maxInputTokens(instructions, input, OUTPUT_SCHEMA);
     let reservation: { status: string; reservation_id?: string };
     try {
       // La reserva va ANTES de cualquier contacto con el proveedor (también la
@@ -255,7 +256,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     }
     if (reservation.status !== "reserved") {
       const known: FallbackReason[] = [
-        "disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted", "session_limit", "daily_limit",
+        "disabled", "budget_exhausted", "rate_limited", "model_invalid", "allowance_exhausted", "session_limit", "daily_limit", "hourly_limit",
       ];
       fallback(known.includes(reservation.status as FallbackReason) ? reservation.status as FallbackReason : "provider_error");
     } else {

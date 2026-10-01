@@ -429,6 +429,14 @@ test("el verificador de PR2e detecta vulnerabilidades y errores reintroducidos",
     "if not private.rate_hit('agent:public:minute'",
     "if false and not private.rate_hit('agent:public:minute'", () =>
       assert.match(verifyPr2e(), /FALLO: no aplicó el tope por minuto/));
+  withFunctionMutation("public.agent_reserve(text,integer,integer)",
+    ">= coalesce((v_config ->> 'public_max_calls_per_hour')::integer, 100) then",
+    ">= 1000000000 then", () =>
+      assert.match(verifyPr2e(), /FALLO: no aplicó el límite por hora/));
+  withFunctionMutation("public.agent_settle(uuid,integer,integer,integer,integer)",
+    "blocked = blocked or v_overrun,",
+    "blocked = blocked,", () =>
+      assert.match(verifyPr2e(), /FALLO: (el incumplimiento no se registró ni bloqueó el mes|siguió reservando tras un incumplimiento)/));
   withFunctionMutation("private.agent_raise_alerts(date,numeric,numeric,jsonb,boolean)",
     "on conflict (month, threshold) do nothing;",
     "on conflict (month, threshold) do update set triggered_at = now(), email_status = 'pending';", () =>
@@ -448,7 +456,7 @@ test("rollback de PR2e: vuelve a PR1b, conserva datos y alertas y se puede reapl
     insert into private.agent_budget_months (month, spent_eur) values (date '2026-01-01', 12.5) on conflict do nothing;`);
   try {
     psqlFile("lab", PR2E_ROLLBACK);
-    assert.equal(psql("lab", "select count(*) from pg_proc where proname in ('agent_alerts_claim','agent_alert_result','agent_raise_alerts','agent_public_model')"), "0");
+    assert.equal(psql("lab", "select count(*) from pg_proc where proname in ('agent_alerts_claim','agent_alert_result','agent_raise_alerts','agent_public_model','agent_hour_start')"), "0");
     assert.equal(psql("lab", "select pg_get_function_identity_arguments('public.agent_settle'::regproc)"), "p_reservation_id uuid, p_input_tokens integer, p_output_tokens integer, p_latency_ms integer");
     assert.equal(psql("lab", "select count(*) from private.agent_budget_alerts where month = date '2026-01-01'"), "1", "conserva las alertas");
     assert.equal(psql("lab", "select (value ? 'public_max_calls_per_minute')::text from private.settings where key = 'agent'"), "false");

@@ -30,11 +30,13 @@ begin
   delete from private.rate_counters where bucket like 'agent:%';
   update private.settings set value = value || '{"enabled": true, "default_model": "gpt-6-luna", "monthly_budget_eur": 25,
       "max_messages_per_session": 1000, "max_calls_per_day": 100000, "public_max_calls_per_minute": 100000,
+      "public_max_calls_per_hour": 100000,
       "public_reserve_margin": 1.25, "alert_thresholds_pct": [50, 80, 100]}'::jsonb where key = 'agent';
   v_cfg := private.agent_config();
 
   -- 0. Configuración: claves nuevas presentes; presupuestos sin tocar.
-  if v_cfg ->> 'public_max_calls_per_minute' is null or v_cfg ->> 'public_reserve_margin' is null then
+  if v_cfg ->> 'public_max_calls_per_minute' is null or v_cfg ->> 'public_max_calls_per_hour' is null
+     or v_cfg ->> 'public_reserve_margin' is null then
     raise exception 'FALLO: faltan las claves nuevas de configuración';
   end if;
   if (v_cfg ->> 'preview_budget_eur')::numeric <> 5 then raise exception 'FALLO: se ha tocado el presupuesto de pruebas'; end if;
@@ -188,6 +190,73 @@ begin
   update private.settings set value = value || '{"max_messages_per_session": 1000, "max_calls_per_day": 3}'::jsonb where key = 'agent';
   if public.agent_reserve(s || '-d1', 10, 1) ->> 'status' <> 'reserved' then raise exception 'FALLO: debería quedar 1 llamada hoy'; end if;
   if public.agent_reserve(s || '-d2', 10, 1) ->> 'status' <> 'daily_limit' then raise exception 'FALLO: no aplicó el límite diario'; end if;
+
+  -- 9b. Límite por hora natural: cuenta reservas reales; se reinicia en la hora siguiente.
+  delete from private.agent_usage; delete from private.agent_reservations; delete from private.agent_budget_months;
+  delete from private.rate_counters where bucket like 'agent:%';
+  update private.settings set value = value || '{"max_calls_per_day": 100000, "public_max_calls_per_hour": 3}'::jsonb where key = 'agent';
+  for v_n in 1..3 loop
+    if public.agent_reserve(s || '-h' || v_n, 10, 1) ->> 'status' <> 'reserved' then raise exception 'FALLO: el límite por hora rechazó antes de tiempo'; end if;
+  end loop;
+  if public.agent_reserve(s || '-h4', 10, 1) ->> 'status' <> 'hourly_limit' then raise exception 'FALLO: no aplicó el límite por hora'; end if;
+  -- Una reserva liberada (error del proveedor) no consume hora.
+  perform public.agent_release((select id from private.agent_reservations order by created_at desc limit 1));
+  if public.agent_reserve(s || '-h5', 10, 1) ->> 'status' <> 'reserved' then raise exception 'FALLO: una liberada contó para la hora'; end if;
+  -- Hora siguiente: las reservas de la hora anterior no cuentan.
+  -- (Liquidadas, como en uso real: una reserva abierta más de 10 min caduca y no cuenta.)
+  update private.agent_reservations set created_at = private.agent_hour_start() - interval '1 minute',
+         status = case when status = 'reserved' then 'settled' else status end;
+  if public.agent_reserve(s || '-h6', 10, 1) ->> 'status' <> 'reserved' then raise exception 'FALLO: el límite por hora no se reinicia'; end if;
+  -- Independiente del diario: el diario sigue mandando aunque la hora tenga hueco.
+  if private.agent_hour_start() > private.agent_day_start() then
+    update private.settings set value = value || '{"public_max_calls_per_hour": 100, "max_calls_per_day": 4}'::jsonb where key = 'agent';
+    if public.agent_reserve(s || '-h7', 10, 1) ->> 'status' <> 'daily_limit' then raise exception 'FALLO: el límite por hora anuló el diario'; end if;
+  end if;
+  update private.settings set value = value || '{"public_max_calls_per_hour": 100000, "max_calls_per_day": 100000}'::jsonb where key = 'agent';
+
+  -- 9c. Garantía estricta: spent + reserved ≤ 25 € aunque el uso real supere la estimación orientativa.
+  delete from private.agent_usage; delete from private.agent_reservations;
+  delete from private.agent_budget_months; delete from private.agent_budget_alerts;
+  insert into private.agent_budget_months (month, spent_eur) values (v_month, 24.995);
+  -- Cota declarada: 3.000 tokens de entrada y 400 de salida.
+  v := public.agent_reserve(s || '-cota', 3000, 400);
+  if v ->> 'status' <> 'reserved' then raise exception 'FALLO: no reservó cerca del límite: %', v; end if;
+  v_id := (v ->> 'reservation_id')::uuid;
+  if (select spent_eur + reserved_eur from private.agent_budget_months where month = v_month) > 25 then
+    raise exception 'FALLO: la reserva dejó spent + reserved por encima de 25 €';
+  end if;
+  -- Uso real muy superior a la estimación orientativa (≈ 1 token/3 caracteres), pero dentro de la cota.
+  v := public.agent_settle(v_id, 3000, 400, 100, 0);
+  if v ->> 'status' <> 'settled' or (select spent_eur + reserved_eur from private.agent_budget_months where month = v_month) > 25 then
+    raise exception 'FALLO: la liquidación dejó el mes por encima de 25 €: %', v;
+  end if;
+  -- Más reservas hasta agotar: ninguna lo supera, ni reservada ni liquidada al máximo.
+  for v_n in 1..50 loop
+    v := public.agent_reserve(s || '-cota' || v_n, 3000, 400);
+    exit when v ->> 'status' <> 'reserved';
+    perform public.agent_settle((v ->> 'reservation_id')::uuid, 3000, 400, 100, 0);
+    if (select spent_eur + reserved_eur from private.agent_budget_months where month = v_month) > 25 then
+      raise exception 'FALLO: el mes superó 25 € tras % liquidaciones al máximo', v_n;
+    end if;
+  end loop;
+  if v ->> 'status' <> 'budget_exhausted' then raise exception 'FALLO: no se llegó a agotar (%)', v; end if;
+
+  -- 9d. Incumplimiento de la cota (consumo por encima de lo declarado): se registra
+  --     el coste real (no se oculta), se marca 'overrun' y el mes queda bloqueado.
+  delete from private.agent_usage; delete from private.agent_reservations;
+  delete from private.agent_budget_months; delete from private.agent_budget_alerts;
+  v := public.agent_reserve(s || '-overrun', 100, 10);
+  v := public.agent_settle((v ->> 'reservation_id')::uuid, 100000, 10);
+  if v ->> 'status' <> 'settled_overrun' then raise exception 'FALLO: no detectó el incumplimiento de la cota: %', v; end if;
+  if (select outcome from private.agent_usage) <> 'overrun' or not (select blocked from private.agent_budget_months where month = v_month) then
+    raise exception 'FALLO: el incumplimiento no se registró ni bloqueó el mes';
+  end if;
+  if public.agent_reserve(s || '-tras-overrun', 1, 1) ->> 'status' <> 'budget_exhausted' then
+    raise exception 'FALLO: siguió reservando tras un incumplimiento de la cota';
+  end if;
+  if not exists (select 1 from private.agent_budget_alerts where month = v_month and threshold = 100) then
+    raise exception 'FALLO: el incumplimiento no avisó (alerta del 100 %%)';
+  end if;
 
   -- 10. Separación absoluta: lo público no toca el libro de pruebas y viceversa.
   select coalesce(sum(spent_eur + reserved_eur), 0) into v_preview_before from private.agent_preview_ledger;

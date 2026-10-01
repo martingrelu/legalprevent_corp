@@ -3,13 +3,21 @@
 -- Sustituye el cálculo heredado de PR1b (precios fijos de gpt-4.1-mini) por la
 -- MISMA tabla de precios por modelo que usa el laboratorio de PR2
 -- (agent.models + usd_eur, función private.agent_model_cost):
---   * reserva conservadora con el modelo público (default_model), sin caché y
---     con un margen (public_reserve_margin), ANTES de contactar con el proveedor;
+--   * reserva con una COTA SUPERIOR del coste ANTES de contactar con el
+--     proveedor: máximos de tokens de entrada (cota estricta calculada por la
+--     función: bytes enviados + formato) y de salida (max_output_tokens, límite
+--     duro del proveedor), modelo público (default_model), sin caché y con
+--     margen (public_reserve_margin ≥ 1);
 --   * liquidación con el consumo real (entrada, caché y salida) y el modelo de
---     la reserva;
---   * el límite mensual nunca se supera con una reserva nueva (bloqueo global);
---   * tope global por minuto (public_max_calls_per_minute) además de los
---     límites por sesión y por día;
+--     la reserva. Como coste real ≤ reserva, el invariante
+--     spent + reserved ≤ monthly_budget_eur se mantiene en todo momento;
+--     si alguna vez se recibiera un consumo por encima de los máximos
+--     declarados (incumplimiento de la cota), se registra el coste real,
+--     se marca como 'overrun' y el modo público se cierra para el resto del
+--     mes (presupuesto bloqueado) en lugar de seguir gastando;
+--   * topes globales por minuto (public_max_calls_per_minute) y por hora
+--     natural (public_max_calls_per_hour, cuenta reservas reales), además de
+--     los límites por sesión y por día;
 --   * alertas al 50, 80 y 100 % (una por umbral y mes) para el CRM y el email,
 --     con reintento seguro; un fallo del email nunca afecta al bloqueo.
 -- El presupuesto de pruebas de PR2 (agent_preview_*) no se toca.
@@ -23,7 +31,8 @@ begin;
 -- 1. Configuración (solo claves nuevas; no cambia presupuestos ni modelo)
 -- ---------------------------------------------------------------------------
 update private.settings
-   set value = jsonb_build_object('public_max_calls_per_minute', 20, 'public_reserve_margin', 1.25) || value,
+   set value = jsonb_build_object('public_max_calls_per_minute', 20, 'public_max_calls_per_hour', 100,
+                                  'public_reserve_margin', 1.25) || value,
        updated_at = now()
  where key = 'agent';
 
@@ -31,6 +40,12 @@ update private.settings
 -- 2. Esquema
 -- ---------------------------------------------------------------------------
 alter table private.agent_reservations add column if not exists model text;
+alter table private.agent_reservations add column if not exists max_input_tokens integer;
+alter table private.agent_reservations add column if not exists max_output_tokens integer;
+alter table private.agent_usage drop constraint if exists agent_usage_outcome_check;
+alter table private.agent_usage add constraint agent_usage_outcome_check check (outcome in ('ok', 'error', 'overrun'));
+-- Mes bloqueado por un incumplimiento de la cota (ver agent_settle).
+alter table private.agent_budget_months add column if not exists blocked boolean not null default false;
 
 create table if not exists private.agent_budget_alerts (
   month date not null,
@@ -87,6 +102,15 @@ begin
 end;
 $$;
 
+-- Inicio de la hora natural en Madrid (límite por hora).
+create or replace function private.agent_hour_start(p_at timestamptz default now())
+returns timestamptz
+language sql
+stable
+as $$
+  select date_trunc('hour', p_at at time zone 'Europe/Madrid') at time zone 'Europe/Madrid'
+$$;
+
 create or replace function private.agent_alerts_pending()
 returns boolean
 language sql
@@ -99,12 +123,13 @@ $$;
 revoke all on function private.agent_public_model(jsonb) from public, anon, authenticated;
 revoke all on function private.agent_raise_alerts(date, numeric, numeric, jsonb, boolean) from public, anon, authenticated;
 revoke all on function private.agent_alerts_pending() from public, anon, authenticated;
+revoke all on function private.agent_hour_start(timestamptz) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. API de la Edge Function (solo service role)
 -- ---------------------------------------------------------------------------
 -- Reserva el coste MÁXIMO de una llamada pública. status:
---   reserved | disabled | rate_limited | session_limit | daily_limit | budget_exhausted
+--   reserved | disabled | rate_limited | hourly_limit | session_limit | daily_limit | budget_exhausted
 create or replace function public.agent_reserve(
   p_session_id text,
   p_max_input_tokens integer,
@@ -149,6 +174,16 @@ begin
 
   insert into private.agent_budget_months (month) values (v_month) on conflict (month) do nothing;
   select * into v_row from private.agent_budget_months where month = v_month;
+  if v_row.blocked then
+    return jsonb_build_object('status', 'budget_exhausted', 'alerts_pending', private.agent_alerts_pending());
+  end if;
+
+  -- Tope por hora natural: cuenta reservas reales (exacto bajo el bloqueo).
+  if (select count(*) from private.agent_reservations
+       where status in ('reserved', 'settled') and created_at >= private.agent_hour_start())
+     >= coalesce((v_config ->> 'public_max_calls_per_hour')::integer, 100) then
+    return jsonb_build_object('status', 'hourly_limit');
+  end if;
 
   if (select count(*) from private.agent_reservations
        where session_id = v_session and status in ('reserved', 'settled')
@@ -172,8 +207,8 @@ begin
     return jsonb_build_object('status', 'budget_exhausted', 'alerts_pending', private.agent_alerts_pending());
   end if;
 
-  insert into private.agent_reservations (month, session_id, reserved_eur, model)
-  values (v_month, v_session, v_estimate, v_model)
+  insert into private.agent_reservations (month, session_id, reserved_eur, model, max_input_tokens, max_output_tokens)
+  values (v_month, v_session, v_estimate, v_model, p_max_input_tokens, p_max_output_tokens)
   returning id into v_id;
   update private.agent_budget_months
      set reserved_eur = reserved_eur + v_estimate, updated_at = now()
@@ -203,6 +238,7 @@ declare
   v_cost numeric;
   v_row private.agent_budget_months;
   v_budget numeric;
+  v_overrun boolean;
 begin
   if coalesce(p_input_tokens, -1) < 0 or coalesce(p_output_tokens, -1) < 0 or coalesce(p_cached_tokens, 0) < 0 then
     raise exception 'agent_tokens_invalid';
@@ -226,11 +262,18 @@ begin
     v_cost := v_res.reserved_eur;
   end if;
 
+  -- Incumplimiento de la cota (consumo por encima de los máximos reservados):
+  -- se registra el coste REAL (no se oculta) y el mes queda bloqueado.
+  v_overrun := v_cost > v_res.reserved_eur
+    or (v_res.max_input_tokens is not null and p_input_tokens > v_res.max_input_tokens)
+    or (v_res.max_output_tokens is not null and p_output_tokens > v_res.max_output_tokens);
+
   update private.agent_budget_months
      set spent_eur = spent_eur + v_cost,
          -- Una reserva caducada ya devolvió su importe.
          reserved_eur = case when v_res.status = 'reserved'
                              then greatest(reserved_eur - v_res.reserved_eur, 0) else reserved_eur end,
+         blocked = blocked or v_overrun,
          updated_at = now()
    where month = v_res.month
   returning * into v_row;
@@ -238,12 +281,13 @@ begin
   update private.agent_reservations set status = 'settled', closed_at = now() where id = v_res.id;
   insert into private.agent_usage (reservation_id, session_id, model, input_tokens, output_tokens, cost_eur, latency_ms, outcome)
   values (v_res.id, v_res.session_id, coalesce(v_res.model, 'desconocido'),
-          p_input_tokens, p_output_tokens, v_cost, p_latency_ms, 'ok');
+          p_input_tokens, p_output_tokens, v_cost, p_latency_ms, case when v_overrun then 'overrun' else 'ok' end);
 
   v_budget := (v_config ->> 'monthly_budget_eur')::numeric;
-  perform private.agent_raise_alerts(v_res.month, v_row.spent_eur, v_budget, v_config, false);
+  perform private.agent_raise_alerts(v_res.month, v_row.spent_eur, v_budget, v_config, v_overrun);
 
-  return jsonb_build_object('status', 'settled', 'cost_eur', v_cost, 'spent_eur', v_row.spent_eur,
+  return jsonb_build_object('status', case when v_overrun then 'settled_overrun' else 'settled' end,
+                            'cost_eur', v_cost, 'spent_eur', v_row.spent_eur,
                             'budget_eur', v_budget, 'alerts_pending', private.agent_alerts_pending());
 end;
 $$;

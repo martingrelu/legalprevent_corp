@@ -386,7 +386,12 @@ ${userText}
 >>>` }
   ];
 }
-var estimateTokens = (text) => Math.ceil(text.length / 3) + 16;
+var INPUT_FORMAT_OVERHEAD_TOKENS = 256;
+var MESSAGE_FORMAT_OVERHEAD_TOKENS = 16;
+var utf8Bytes = (text) => new TextEncoder().encode(text).length;
+function maxInputTokens(instructions, input, schema) {
+  return utf8Bytes(instructions) + utf8Bytes(JSON.stringify(input)) + utf8Bytes(JSON.stringify(schema ?? null)) + INPUT_FORMAT_OVERHEAD_TOKENS + MESSAGE_FORMAT_OVERHEAD_TOKENS * (input.length + 1);
+}
 
 // supabase/functions/sales-agent/providers.ts
 var ProviderNotEnabled = class extends Error {
@@ -837,7 +842,7 @@ async function handleRequest(request, deps) {
   if (!fallbackReason) {
     const instructions = buildInstructions(canary);
     const input = buildInput(state.t, redacted.text, config.max_history_turns);
-    const maxInput = estimateTokens(instructions) + input.reduce((n, m) => n + estimateTokens(m.content), 0);
+    const maxInput = maxInputTokens(instructions, input, OUTPUT_SCHEMA);
     let reservation;
     try {
       reservation = await budget.reserve(maxInput, config.max_output_tokens);
@@ -853,7 +858,8 @@ async function handleRequest(request, deps) {
         "model_invalid",
         "allowance_exhausted",
         "session_limit",
-        "daily_limit"
+        "daily_limit",
+        "hourly_limit"
       ];
       fallback(known.includes(reservation.status) ? reservation.status : "provider_error");
     } else {

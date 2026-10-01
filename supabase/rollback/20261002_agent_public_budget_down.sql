@@ -3,7 +3,8 @@
 -- Vuelve a las funciones del presupuesto público de PR1b (copiadas literalmente
 -- de 20260926_agent_budget.sql) y al resumen del laboratorio de PR2. Conserva
 -- los datos: reservas, uso, meses y alertas (private.agent_budget_alerts) y la
--- columna agent_reservations.model, que el código de PR1b ignora.
+-- columnas nuevas (agent_reservations.model/max_*_tokens, agent_budget_months.blocked)
+-- y el valor 'overrun' permitido en agent_usage.outcome, que el código de PR1b ignora.
 -- Ojo: las funciones de PR1b vuelven a calcular con los precios heredados
 -- (price_input/output_eur_per_mtok).
 
@@ -15,6 +16,7 @@ drop function if exists public.agent_settle(uuid, integer, integer, integer, int
 drop function if exists private.agent_raise_alerts(date, numeric, numeric, jsonb, boolean);
 drop function if exists private.agent_alerts_pending();
 drop function if exists private.agent_public_model(jsonb);
+drop function if exists private.agent_hour_start(timestamptz);
 
 create or replace function public.agent_reserve(
   p_session_id text,
@@ -221,7 +223,7 @@ end;
 $$;
 
 update private.settings
-   set value = value - 'public_max_calls_per_minute' - 'public_reserve_margin', updated_at = now()
+   set value = value - 'public_max_calls_per_minute' - 'public_max_calls_per_hour' - 'public_reserve_margin', updated_at = now()
  where key = 'agent';
 
 revoke all on function public.agent_reserve(text, integer, integer) from public, anon, authenticated;
