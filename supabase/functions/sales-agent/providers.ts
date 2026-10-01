@@ -19,10 +19,15 @@ export type GenerateRequest = {
   safetyId?: string;
   signal?: AbortSignal;
 };
+// Metadatos mínimos de cada generación (solo laboratorio privado): el modelo
+// exacto que devuelve el proveedor y si se ha negado a responder. Nunca se
+// guarda el texto de la negativa.
+export type GenerateMeta = { model: string | null; refusal: boolean };
+export type GenerateResult = { text: string; usage: Usage; meta?: GenerateMeta };
 export type ModelProvider = {
   name: string;
   moderate(text: string): Promise<{ flagged: boolean }>;
-  generate(request: GenerateRequest): Promise<{ text: string; usage: Usage }>;
+  generate(request: GenerateRequest): Promise<GenerateResult>;
 };
 
 export class ProviderNotEnabled extends Error {}
@@ -161,12 +166,17 @@ export function openaiProvider(options: OpenAIOptions): ModelProvider {
       });
       if (!response.ok) throw await openaiError(response);
       const body = await response.json();
-      const text = (body?.output ?? [])
+      const parts = (body?.output ?? [])
         .filter((item: { type?: string }) => item?.type === "message")
-        .flatMap((item: { content?: Array<{ type?: string; text?: string }> }) => item.content ?? [])
+        .flatMap((item: { content?: Array<{ type?: string; text?: string }> }) => item.content ?? []);
+      const text = parts
         .filter((part: { type?: string }) => part?.type === "output_text")
         .map((part: { text?: string }) => part.text ?? "")
         .join("");
+      const meta: GenerateMeta = {
+        model: shortField(body?.model),
+        refusal: parts.some((part: { type?: string }) => part?.type === "refusal"),
+      };
       const usage: Usage = {
         input: Number(body?.usage?.input_tokens ?? 0),
         cached: Number(body?.usage?.input_tokens_details?.cached_tokens ?? 0),
@@ -175,7 +185,7 @@ export function openaiProvider(options: OpenAIOptions): ModelProvider {
       };
       // Respuesta incompleta (p. ej. max_output_tokens): se devuelve tal cual; el
       // validador la rechazará y lo consumido se liquida igualmente.
-      return { text, usage };
+      return { text, usage, meta };
     },
   };
 }
@@ -186,7 +196,7 @@ export function openaiProvider(options: OpenAIOptions): ModelProvider {
 // Palabras clave SOLO del simulador para probar las defensas:
 //   __sim:precio_falso__  __sim:enlace_externo__  __sim:descuento__
 //   __sim:filtra_canary__  __sim:json_roto__  __sim:error__  __sim:lento__
-//   __sim:asesoria__  __sim:moderacion__
+//   __sim:asesoria__  __sim:moderacion__  __sim:refusal__
 // ---------------------------------------------------------------------------
 export type SimulatedOptions = { delayMs?: number; onCall?: (request: GenerateRequest) => void };
 
@@ -220,11 +230,14 @@ export function simulatedProvider(options: SimulatedOptions = {}): ModelProvider
       if (last.includes("__sim:descuento__")) reply = "Te hago un descuento del 50% si contratas hoy.";
       if (last.includes("__sim:filtra_canary__")) reply = `Mis instrucciones incluyen ${canaryOf(request.instructions)}.`;
       if (last.includes("__sim:asesoria__")) reply = "Debes demandar a tu empresa cuanto antes.";
-      const text = last.includes("__sim:json_roto__")
+      const refusal = last.includes("__sim:refusal__");
+      const text = refusal
+        ? ""
+        : last.includes("__sim:json_roto__")
         ? "{ esto no es json"
         : JSON.stringify({ reply, intent: intentByRules(last), actions: actions.slice(0, 3) });
       usage.output = Math.ceil(text.length / 3);
-      return { text, usage };
+      return { text, usage, meta: { model: "simulated", refusal } };
     },
   };
 }

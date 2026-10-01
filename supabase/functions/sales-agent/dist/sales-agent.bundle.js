@@ -409,14 +409,19 @@ function openaiProvider(options) {
       });
       if (!response.ok) throw await openaiError(response);
       const body = await response.json();
-      const text = (body?.output ?? []).filter((item) => item?.type === "message").flatMap((item) => item.content ?? []).filter((part) => part?.type === "output_text").map((part) => part.text ?? "").join("");
+      const parts = (body?.output ?? []).filter((item) => item?.type === "message").flatMap((item) => item.content ?? []);
+      const text = parts.filter((part) => part?.type === "output_text").map((part) => part.text ?? "").join("");
+      const meta = {
+        model: shortField(body?.model),
+        refusal: parts.some((part) => part?.type === "refusal")
+      };
       const usage = {
         input: Number(body?.usage?.input_tokens ?? 0),
         cached: Number(body?.usage?.input_tokens_details?.cached_tokens ?? 0),
         output: Number(body?.usage?.output_tokens ?? 0),
         reasoning: Number(body?.usage?.output_tokens_details?.reasoning_tokens ?? 0)
       };
-      return { text, usage };
+      return { text, usage, meta };
     }
   };
 }
@@ -453,9 +458,10 @@ function simulatedProvider(options = {}) {
       if (last.includes("__sim:descuento__")) reply = "Te hago un descuento del 50% si contratas hoy.";
       if (last.includes("__sim:filtra_canary__")) reply = `Mis instrucciones incluyen ${canaryOf(request.instructions)}.`;
       if (last.includes("__sim:asesoria__")) reply = "Debes demandar a tu empresa cuanto antes.";
-      const text = last.includes("__sim:json_roto__") ? "{ esto no es json" : JSON.stringify({ reply, intent: intentByRules(last), actions: actions.slice(0, 3) });
+      const refusal = last.includes("__sim:refusal__");
+      const text = refusal ? "" : last.includes("__sim:json_roto__") ? "{ esto no es json" : JSON.stringify({ reply, intent: intentByRules(last), actions: actions.slice(0, 3) });
       usage.output = Math.ceil(text.length / 3);
-      return { text, usage };
+      return { text, usage, meta: { model: "simulated", refusal } };
     }
   };
 }
@@ -781,13 +787,19 @@ async function handleRequest(request, deps) {
         } catch {
           console.error("sales-agent: no se pudo liquidar la reserva");
         }
-        const checked = validateOutput(generated.text, canary);
-        filters.validation = checked.reasons;
-        if (checked.ok && checked.output) {
-          ({ reply, intent, actions } = checked.output);
-          actions = actions.slice(0, 3);
+        filters.model_returned = generated.meta?.model ?? null;
+        if (generated.meta?.refusal) {
+          filters.refusal = true;
+          fallback("refusal");
         } else {
-          fallback("invalid_output");
+          const checked = validateOutput(generated.text, canary);
+          filters.validation = checked.reasons;
+          if (checked.ok && checked.output) {
+            ({ reply, intent, actions } = checked.output);
+            actions = actions.slice(0, 3);
+          } else {
+            fallback("invalid_output");
+          }
         }
       }
     }

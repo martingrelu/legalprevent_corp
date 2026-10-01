@@ -18,7 +18,7 @@ import { KB } from "./kb.ts";
 import { buildInput, buildInstructions, estimateTokens } from "./prompt.ts";
 import {
   notEnabledProvider, openaiProvider, ProviderHttpError, ProviderNotEnabled, resolveEndpoint, simulatedProvider,
-  type ModelProvider, type Usage,
+  type GenerateResult, type ModelProvider, type Usage,
 } from "./providers.ts";
 import { redact } from "./redact.ts";
 import { type AgentState, canaryFor, newConversationId, signState, verifyState } from "./state.ts";
@@ -215,7 +215,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     } else if (reservation.status === "reserved") {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-      let generated: { text: string; usage: Usage } | null = null;
+      let generated: GenerateResult | null = null;
       try {
         generated = await provider.generate({
           model, instructions, input, maxOutputTokens: config.max_output_tokens,
@@ -240,13 +240,20 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
         } catch {
           console.error("sales-agent: no se pudo liquidar la reserva");
         }
-        const checked = validateOutput(generated.text, canary);
-        filters.validation = checked.reasons;
-        if (checked.ok && checked.output) {
-          ({ reply, intent, actions } = checked.output);
-          actions = actions.slice(0, 3);
+        // Solo laboratorio privado: modelo exacto devuelto y negativa (sin su texto).
+        filters.model_returned = generated.meta?.model ?? null;
+        if (generated.meta?.refusal) {
+          filters.refusal = true;
+          fallback("refusal");
         } else {
-          fallback("invalid_output");
+          const checked = validateOutput(generated.text, canary);
+          filters.validation = checked.reasons;
+          if (checked.ok && checked.output) {
+            ({ reply, intent, actions } = checked.output);
+            actions = actions.slice(0, 3);
+          } else {
+            fallback("invalid_output");
+          }
         }
       }
     }

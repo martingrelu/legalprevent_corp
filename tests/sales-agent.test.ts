@@ -100,7 +100,7 @@ test("validador: rechaza precios no publicados, descuentos, enlaces, emails, tel
 test("fallback: útil, sin errores técnicos y pasa su propio validador y las reglas de la batería", async () => {
   const canary = await canaryFor(SECRET);
   const rules = battery.reglas_globales.must_not_regex.map((r: string) => new RegExp(r.replace(/^\(\?i\)/, ""), r.startsWith("(?i)") ? "i" : ""));
-  const reasons = ["disabled", "budget_exhausted", "rate_limited", "provider_error", "timeout", "invalid_output", "injection", "message_too_long", "conversation_limit", "moderation", "provider_not_enabled"] as const;
+  const reasons = ["disabled", "budget_exhausted", "rate_limited", "provider_error", "timeout", "invalid_output", "refusal", "injection", "message_too_long", "conversation_limit", "moderation", "provider_not_enabled"] as const;
   for (const message of ["¿cuánto cuesta?", "soy gestoría", "me van a multar", "hola", "quiero una demo"]) {
     for (const reason of reasons) {
       const result = fallbackReply(message, reason);
@@ -250,6 +250,15 @@ test("salida maliciosa del modelo: se paga lo consumido pero no llega al visitan
     assert.doesNotMatch(body.reply, /99 €|phishing|50%|LP-CANARY|demandar/);
     assert.equal(called("agent_preview_settle").length, 1, `${trigger}: se liquida`);
   }
+});
+
+test("simulador: negativa del modelo → fallback refusal, liquidado y marcado", async () => {
+  const { deps, called } = setup();
+  const body = await (await handleRequest(post({ message: "hola __sim:refusal__", model: "gpt-6-luna" }), deps)).json();
+  assert.equal(body.debug.fallback_reason, "refusal");
+  assert.equal(body.debug.filters.refusal, true);
+  assert.equal(body.debug.filters.model_returned, "simulated");
+  assert.equal(called("agent_preview_settle").length, 1);
 });
 
 test("error, lentitud o proveedor real no habilitado: reserva liberada y fallback", async () => {
