@@ -19,13 +19,13 @@
   root.LegalPreventAgentWidget = api;
   if (root.document) api.boot(root);
 })(typeof window !== "undefined" ? window : globalThis, function () {
-  const PUBLIC_LAUNCHER = false;
+  const PUBLIC_LAUNCHER = true;
   const PREVIEW_HASH = "#agente-preview";
   // Modelo para la vista previa con sesión de administrador (en modo público lo
   // decide siempre el servidor y este valor se ignora).
   const PREVIEW_MODEL = "gpt-6-luna";
   const SESSION_KEY = "lp_supabase_session";
-  const ASSET_VERSION = "20261002-1";
+  const ASSET_VERSION = "20261002-2";
   const MAX_CHARS = 1000;
   const TIMEOUT_MS = 25000;
   const PAGES = new Set(["/", "/index.html", "/partner/", "/partner/index.html"]);
