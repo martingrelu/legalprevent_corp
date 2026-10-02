@@ -2,6 +2,9 @@
 index.html
 styles.css
 script.js
+# Asistente Escudito (PR2f): inactivo para visitantes mientras PUBLIC_LAUNCHER=false
+agent-widget.js
+agent-widget.css
 aviso-legal/index.html
 politica-privacidad/index.html
 politica-cookies/index.html

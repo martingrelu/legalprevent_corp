@@ -262,6 +262,9 @@ async function runBattery(rerender) {
       const ids = (last?.actions || []).map((a) => a.id);
       if (testCase.acciones?.length && !testCase.acciones.some((a) => ids.includes(a))) reasons.push(`acción esperada: ${testCase.acciones.join(" | ")}`);
       if (testCase.intent && last?.intent !== testCase.intent) reasons.push(`intención ${last?.intent} ≠ ${testCase.intent}`);
+      // Brevedad (casos de alcance, v1.2): sin contar la frase de identificación como IA.
+      const words = (last?.reply || "").replace(/^Soy el asistente virtual de LegalPrevent, una inteligencia artificial\.\s*/, "").trim().split(/\s+/).filter(Boolean).length;
+      if (testCase.max_palabras && words > testCase.max_palabras) reasons.push(`${words} palabras > ${testCase.max_palabras}`);
       if (!/^Soy el asistente virtual de LegalPrevent, una inteligencia artificial\./.test(lab.messages.find((m) => m.role === "assistant")?.text || "")) reasons.push("sin identificación como IA");
     } catch (error) {
       reasons.push(`error: ${error.message}`);

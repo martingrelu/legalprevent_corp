@@ -1,0 +1,484 @@
+/* Escudito, asistente comercial de LegalPrevent (PR2f). Todo bajo #lp-agent
+   para no afectar al resto de la web. Lo carga agent-widget.js solo cuando el
+   widget se activa. */
+#lp-agent {
+  --lpa-blue: #1e5eff;
+  --lpa-blue-dark: #0f172a;
+  --lpa-blue-soft: #e8efff;
+  --lpa-green: #13b981;
+  --lpa-text: #111827;
+  --lpa-muted: #475569;
+  --lpa-line: #e2e8f0;
+  --lpa-soft: #f8fafc;
+  --lpa-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--lpa-text);
+}
+
+#lp-agent *,
+#lp-agent *::before,
+#lp-agent *::after {
+  box-sizing: border-box;
+}
+
+/* ---------- Botón flotante ---------- */
+.lpa-launcher {
+  position: fixed;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--lpa-shadow), 0 0 0 1px var(--lpa-line);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.lpa-launcher:hover {
+  transform: translateY(-2px);
+}
+
+.lpa-launcher:focus-visible,
+#lp-agent a:focus-visible,
+#lp-agent button:focus-visible,
+#lp-agent textarea:focus-visible,
+.lpa-log:focus-visible {
+  outline: 3px solid var(--lpa-blue);
+  outline-offset: 2px;
+}
+
+.lpa-hint {
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 6px 10px;
+  border: 1px solid var(--lpa-line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+  color: var(--lpa-text);
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.lpa-launcher:hover .lpa-hint,
+.lpa-launcher:focus-visible .lpa-hint {
+  opacity: 1;
+}
+
+#lp-agent.is-open .lpa-launcher,
+#lp-agent.is-behind-cookies .lpa-launcher {
+  display: none;
+}
+
+/* ---------- Panel ---------- */
+.lpa-panel {
+  position: fixed;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  height: 560px;
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: var(--lpa-shadow), 0 0 0 1px var(--lpa-line);
+  animation: lpa-in 180ms ease-out;
+}
+
+.lpa-panel[hidden] {
+  display: none;
+}
+
+@keyframes lpa-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.lpa-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 14px;
+  background: var(--lpa-blue-dark);
+  color: #fff;
+}
+
+.lpa-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.lpa-heading h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.lpa-heading span {
+  color: #cbd5e1;
+  font-size: 12px;
+}
+
+.lpa-close {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+
+.lpa-close:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+#lp-agent .lpa-close:focus-visible {
+  outline-color: #fff;
+}
+
+.lpa-notice {
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--lpa-blue-soft);
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.lpa-notice a {
+  color: inherit;
+  font-weight: 600;
+}
+
+.lpa-log {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.lpa-turn {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.lpa-turn-me {
+  justify-items: end;
+}
+
+.lpa-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--lpa-muted);
+  font-size: 12px;
+}
+
+.lpa-msg {
+  max-width: 88%;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.lpa-bot {
+  border: 1px solid var(--lpa-line);
+  border-bottom-left-radius: 4px;
+  background: var(--lpa-soft);
+}
+
+.lpa-me {
+  border-bottom-right-radius: 4px;
+  background: var(--lpa-blue);
+  color: #fff;
+}
+
+.lpa-err {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.lpa-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#lp-agent .lpa-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid var(--lpa-blue);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--lpa-blue);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+#lp-agent .lpa-chip.is-primary {
+  background: var(--lpa-blue);
+  color: #fff;
+}
+
+.lpa-suggestions {
+  display: grid;
+  gap: 6px;
+}
+
+.lpa-suggestion {
+  padding: 6px 12px;
+  border: 1px solid var(--lpa-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--lpa-text);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lpa-suggestion::before {
+  content: "→ ";
+  color: var(--lpa-blue);
+}
+
+.lpa-suggestion:hover {
+  border-color: var(--lpa-blue);
+}
+
+.lpa-dots {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.lpa-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lpa-muted);
+  animation: lpa-dot 1.2s infinite;
+}
+
+.lpa-dots i:nth-child(2) { animation-delay: 0.15s; }
+.lpa-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes lpa-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+.lpa-status,
+.lpa-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lpa-human {
+  margin: 0 12px 4px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.lpa-human a {
+  color: var(--lpa-blue);
+  font-weight: 600;
+}
+
+.lpa-composer {
+  padding: 8px 12px 6px;
+  border-top: 1px solid var(--lpa-line);
+}
+
+.lpa-row {
+  display: flex;
+  gap: 8px;
+}
+
+.lpa-input {
+  flex: 1;
+  min-height: 44px;
+  max-height: 120px;
+  padding: 10px;
+  border: 1px solid #64748b;
+  border-radius: 10px;
+  color: var(--lpa-text);
+  font: inherit;
+  font-size: 16px;
+  resize: none;
+}
+
+.lpa-input:disabled {
+  background: var(--lpa-soft);
+}
+
+.lpa-send {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--lpa-blue);
+  color: #fff;
+  cursor: pointer;
+}
+
+.lpa-send:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.lpa-meta {
+  display: block;
+  margin-top: 5px;
+  color: var(--lpa-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.lpa-count {
+  float: right;
+  margin-left: 8px;
+}
+
+/* ---------- Mascota ---------- */
+.lpa-mascot {
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.lpa-mascot .lpa-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lpa-blink 5s infinite;
+}
+
+.lpa-mascot.is-thinking .lpa-eye {
+  animation: none;
+  transform: translateY(-2.5px) scaleY(0.85);
+}
+
+.lpa-mascot.is-thinking .lpa-seal {
+  animation: lpa-glow 1s infinite alternate;
+}
+
+.lpa-mascot.is-error .lpa-eye {
+  animation: none;
+  transform: scaleY(0.22);
+}
+
+.lpa-mascot.is-error .lpa-smile {
+  opacity: 0;
+}
+
+@keyframes lpa-blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.1); }
+}
+
+@keyframes lpa-glow {
+  from { opacity: 0.45; }
+  to { opacity: 1; }
+}
+
+/* ---------- Móvil: hoja a pantalla completa ---------- */
+@media (max-width: 639px) {
+  .lpa-launcher {
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: 56px;
+    height: 56px;
+  }
+
+  .lpa-launcher .lpa-mascot {
+    width: 40px;
+    height: 40px;
+  }
+
+  .lpa-hint {
+    display: none;
+  }
+
+  .lpa-panel {
+    inset: 0;
+    width: auto;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .lpa-header {
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+
+  .lpa-close {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+html.lpa-lock,
+html.lpa-lock body {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lpa-panel,
+  .lpa-launcher,
+  .lpa-hint,
+  .lpa-dots i,
+  .lpa-mascot .lpa-eye,
+  .lpa-mascot.is-thinking .lpa-seal {
+    animation: none !important;
+    transition: none !important;
+  }
+}
