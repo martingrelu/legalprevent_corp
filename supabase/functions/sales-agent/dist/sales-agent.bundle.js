@@ -195,6 +195,9 @@ function resolveAction(id) {
   const plan = id.slice("link:comprar:".length);
   return { id, label: `Contratar ${PLAN_NAMES[plan]}`, url: ENLACES.comprar(plan) };
 }
+function ensureLegalContact(intent, actions) {
+  return intent === "asesoramiento_juridico" && actions.length === 0 ? ["form:contacto"] : actions;
+}
 
 // supabase/functions/sales-agent/alerts.ts
 var MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -913,7 +916,9 @@ async function handleRequest(request, deps) {
           filters.validation = checked.reasons;
           if (checked.ok && checked.output) {
             ({ reply, intent, actions } = checked.output);
-            actions = actions.slice(0, 3);
+            const fromModel = actions.slice(0, 3);
+            actions = ensureLegalContact(intent, fromModel);
+            if (actions.length > fromModel.length) filters.actions_added = actions.slice(fromModel.length);
           } else {
             fallback("invalid_output");
           }

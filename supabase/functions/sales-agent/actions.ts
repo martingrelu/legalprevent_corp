@@ -32,3 +32,10 @@ export function resolveAction(id: Action): ResolvedAction {
   const plan = id.slice("link:comprar:".length);
   return { id, label: `Contratar ${PLAN_NAMES[plan]}`, url: ENLACES.comprar(plan) };
 }
+
+// Garantía determinista (ALC-06): si el modelo rechaza un asesoramiento
+// jurídico sin ofrecer ninguna salida, se añade el formulario de contacto
+// existente. Nunca sustituye ni duplica acciones elegidas por el modelo.
+export function ensureLegalContact(intent: string, actions: Action[]): Action[] {
+  return intent === "asesoramiento_juridico" && actions.length === 0 ? ["form:contacto"] : actions;
+}

@@ -18,7 +18,7 @@
 // modelo (timeout, sin herramientas, salida JSON) → validación de salida →
 // liquidación → registro (privado: turno; público: evento anónimo) → respuesta.
 // La clave del proveedor y la service role nunca salen de aquí.
-import { type Action, resolveAction } from "./actions.ts";
+import { type Action, ensureLegalContact, resolveAction } from "./actions.ts";
 import { deliverAlerts } from "./alerts.ts";
 import { AI_DISCLOSURE, fallbackReply, type FallbackReason } from "./fallback.ts";
 import { detectInjection } from "./guard.ts";
@@ -305,7 +305,9 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
           filters.validation = checked.reasons;
           if (checked.ok && checked.output) {
             ({ reply, intent, actions } = checked.output);
-            actions = actions.slice(0, 3);
+            const fromModel = actions.slice(0, 3);
+            actions = ensureLegalContact(intent, fromModel);
+            if (actions.length > fromModel.length) filters.actions_added = actions.slice(fromModel.length);
           } else {
             fallback("invalid_output");
           }
