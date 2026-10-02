@@ -19,12 +19,12 @@ function loadWidget() {
 }
 const W = loadWidget();
 
-test("cerrado para visitantes: PUBLIC_LAUNCHER=false y solo se activa con #agente-preview", () => {
-  assert.equal(W.PUBLIC_LAUNCHER, false);
-  assert.match(SOURCE, /const PUBLIC_LAUNCHER = false;/);
+test("lanzado: PUBLIC_LAUNCHER=true, activo sin hash en portada y /partner/, y la vista previa sigue funcionando", () => {
+  assert.equal(W.PUBLIC_LAUNCHER, true);
+  assert.match(SOURCE, /const PUBLIC_LAUNCHER = true;/);
   for (const pathname of ["/", "/index.html", "/partner/", "/partner/index.html"]) {
-    assert.equal(W.shouldActivate({ pathname, hash: "" }), false, `${pathname} sin vista previa`);
-    assert.equal(W.shouldActivate({ pathname, hash: "#precios" }), false);
+    assert.equal(W.shouldActivate({ pathname, hash: "" }), true, `${pathname} sin vista previa`);
+    assert.equal(W.shouldActivate({ pathname, hash: "#precios" }), true);
     assert.equal(W.shouldActivate({ pathname, hash: "#agente-preview" }), true, `${pathname} con vista previa`);
   }
 });
