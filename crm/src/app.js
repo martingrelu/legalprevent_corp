@@ -12,7 +12,7 @@ import {
   TASK_STATUSES,
   SCHEMA,
 } from "./models.js?v=20261002-1";
-import { handleAgentLabEvent, mountAgentLab, renderAgentLab } from "./agent-lab.js?v=20261002-1";
+import { handleAgentLabEvent, mountAgentLab, renderAgentLab } from "./agent-lab.js?v=20261002-2";
 import {
   addInteraction,
   applyAutomations,
