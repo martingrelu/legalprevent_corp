@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://legalprevent.com/</loc></url>
-  <url><loc>https://legalprevent.com/partner/</loc></url>
-  <url><loc>https://legalprevent.com/diagnostico/</loc></url>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url><loc>https://legalprevent.com/</loc><xhtml:link rel="alternate" hreflang="es" href="https://legalprevent.com/" /><xhtml:link rel="alternate" hreflang="en" href="https://legalprevent.com/en/" /><xhtml:link rel="alternate" hreflang="x-default" href="https://legalprevent.com/" /></url>
+  <url><loc>https://legalprevent.com/partner/</loc><xhtml:link rel="alternate" hreflang="es" href="https://legalprevent.com/partner/" /><xhtml:link rel="alternate" hreflang="en" href="https://legalprevent.com/en/partner/" /><xhtml:link rel="alternate" hreflang="x-default" href="https://legalprevent.com/partner/" /></url>
+  <url><loc>https://legalprevent.com/diagnostico/</loc><xhtml:link rel="alternate" hreflang="es" href="https://legalprevent.com/diagnostico/" /><xhtml:link rel="alternate" hreflang="en" href="https://legalprevent.com/en/diagnostico/" /><xhtml:link rel="alternate" hreflang="x-default" href="https://legalprevent.com/diagnostico/" /></url>
   <url><loc>https://legalprevent.com/aviso-legal/</loc></url>
   <url><loc>https://legalprevent.com/politica-privacidad/</loc></url>
   <url><loc>https://legalprevent.com/politica-cookies/</loc></url>
   <url><loc>https://legalprevent.com/terminos-condiciones/</loc></url>
   <url><loc>https://legalprevent.com/documentacion-legal/</loc></url>
+  <url><loc>https://legalprevent.com/en/</loc><xhtml:link rel="alternate" hreflang="es" href="https://legalprevent.com/" /><xhtml:link rel="alternate" hreflang="en" href="https://legalprevent.com/en/" /><xhtml:link rel="alternate" hreflang="x-default" href="https://legalprevent.com/" /></url>
+  <url><loc>https://legalprevent.com/en/partner/</loc><xhtml:link rel="alternate" hreflang="es" href="https://legalprevent.com/partner/" /><xhtml:link rel="alternate" hreflang="en" href="https://legalprevent.com/en/partner/" /><xhtml:link rel="alternate" hreflang="x-default" href="https://legalprevent.com/partner/" /></url>
+  <url><loc>https://legalprevent.com/en/diagnostico/</loc><xhtml:link rel="alternate" hreflang="es" href="https://legalprevent.com/diagnostico/" /><xhtml:link rel="alternate" hreflang="en" href="https://legalprevent.com/en/diagnostico/" /><xhtml:link rel="alternate" hreflang="x-default" href="https://legalprevent.com/diagnostico/" /></url>
 </urlset>

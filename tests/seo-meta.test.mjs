@@ -123,7 +123,7 @@ test("robots.txt permite rastrear (incluido el noindex del CRM) y anuncia el sit
 
 test("sitemap.xml contiene exactamente las páginas indexables publicadas", () => {
   const locs = [...read("sitemap.xml").matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-  const expected = Object.values(INDEXABLE).map((path) => BASE + path);
+  const expected = [...Object.values(INDEXABLE), "/en/", "/en/partner/", "/en/diagnostico/"].map((path) => BASE + path);
   assert.deepEqual([...locs].sort(), [...expected].sort());
   for (const [file] of Object.entries(INDEXABLE)) assert.ok(allowlist.has(file), `${file} en la allowlist`);
   assert.ok(!locs.some((loc) => /gracias|crm/.test(loc)), "ni gracias ni CRM en el sitemap");

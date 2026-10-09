@@ -1,3 +1,4 @@
+const diagnosticTranslate = value => window.LegalPreventI18n?.t(value) ?? value;
 const diagnosticApp = document.querySelector("[data-diagnostic-app]");
 
 const diagnosticQuestions = [
@@ -146,7 +147,7 @@ if (diagnosticApp) {
   const updateQuestionProgress = () => {
     const answered = Object.keys(state.answers).length;
     const total = diagnosticQuestions.length;
-    if (questionCount) questionCount.textContent = `${answered} de ${total} preguntas`;
+    if (questionCount) questionCount.textContent = document.documentElement.lang === "en" ? `${answered} of ${total} questions` : `${answered} de ${total} preguntas`;
     if (questionProgress) questionProgress.style.width = `${(answered / total) * 100}%`;
   };
 
@@ -546,7 +547,7 @@ if (diagnosticApp) {
     let y = 780;
     const margin = 48;
     const tone = reportTone(payload.result.globalScore);
-    const today = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "long", year: "numeric" }).format(new Date());
+    const today = new Intl.DateTimeFormat(document.documentElement.lang === "en" ? "en-GB" : "es-ES", { day: "2-digit", month: "long", year: "numeric" }).format(new Date());
 
     const add = (command) => commands.push(command);
     const pdfRgb = (rgb) =>
@@ -570,7 +571,7 @@ if (diagnosticApp) {
     };
     const paragraph = (value, x, top, maxChars = 82, size = 10, leading = 15, font = "F1", rgb = "51 65 85") => {
       let cursor = top;
-      wrapPdfText(value, maxChars).forEach((lineText) => {
+      wrapPdfText(diagnosticTranslate(value), maxChars).forEach((lineText) => {
         text(lineText, x, cursor, size, font, rgb);
         cursor -= leading;
       });
@@ -578,8 +579,8 @@ if (diagnosticApp) {
     };
     const footer = (pageNumber) => {
       line(margin, 46, 547, 46, "226 232 240");
-      text("LEGAL PREVENT | Informe de diagnóstico preventivo", margin, 28, 8, "F2", "71 85 105");
-      text(`Página ${pageNumber}`, 500, 28, 8, "F1", "100 116 139");
+      text(diagnosticTranslate("LEGAL PREVENT | Informe de diagnóstico preventivo"), margin, 28, 8, "F2", "71 85 105");
+      text(diagnosticTranslate(`Página ${pageNumber}`), 500, 28, 8, "F1", "100 116 139");
     };
     const newPage = () => {
       if (commands.length) {
@@ -596,42 +597,42 @@ if (diagnosticApp) {
       ensureSpace(54);
       text(label.toUpperCase(), margin, y, 8, "F2", "30 94 255");
       y -= 19;
-      text(title, margin, y, 18, "F2", "15 23 42");
+      text(diagnosticTranslate(title), margin, y, 18, "F2", "15 23 42");
       y -= 24;
     };
     const bullet = (value, x = margin, maxChars = 82) => {
       ensureSpace(34);
-      text("-", x, y, 10, "F2", "30 94 255");
+      text(diagnosticTranslate("-"), x, y, 10, "F2", "30 94 255");
       y = paragraph(value, x + 14, y, maxChars, 9.5, 14, "F1", "51 65 85") - 4;
     };
 
     rect(0, 842, 595, 842, "248 250 252");
     rect(0, 842, 595, 172, "15 23 42");
     rect(48, 752, 62, 62, "30 94 255");
-    text("LP", 67, 712, 24, "F2", "255 255 255");
-    text("LEGAL PREVENT", 128, 724, 12, "F2", "255 255 255");
-    text("Informe de diagnóstico preventivo", 128, 695, 28, "F2", "255 255 255");
-    text("Cumplimiento legal inteligente para empresas modernas", 128, 672, 11, "F1", "203 213 225");
+    text(diagnosticTranslate("LP"), 67, 712, 24, "F2", "255 255 255");
+    text(diagnosticTranslate("LEGAL PREVENT"), 128, 724, 12, "F2", "255 255 255");
+    text(diagnosticTranslate("Informe de diagnóstico preventivo"), 128, 695, 28, "F2", "255 255 255");
+    text(diagnosticTranslate("Cumplimiento legal inteligente para empresas modernas"), 128, 672, 11, "F1", "203 213 225");
 
     rect(48, 610, 499, 118, "255 255 255");
     text(payload.company.company || "Empresa analizada", 70, 570, 22, "F2", "15 23 42");
-    text(`Fecha de emisión: ${today}`, 70, 544, 10, "F1", "71 85 105");
-    text(`Sector: ${payload.company.sector || "No indicado"} | Empleados: ${payload.company.employees || "No indicado"}`, 70, 526, 10, "F1", "71 85 105");
-    text(`Contacto: ${payload.company.email || "No indicado"} | ${payload.company.phone || "Sin teléfono"}`, 70, 508, 10, "F1", "71 85 105");
+    text(diagnosticTranslate(`Fecha de emisión: ${today}`), 70, 544, 10, "F1", "71 85 105");
+    text(diagnosticTranslate(`Sector: ${payload.company.sector || "No indicado"} | Empleados: ${payload.company.employees || "No indicado"}`), 70, 526, 10, "F1", "71 85 105");
+    text(diagnosticTranslate(`Contacto: ${payload.company.email || "No indicado"} | ${payload.company.phone || "Sin teléfono"}`), 70, 508, 10, "F1", "71 85 105");
 
     rect(48, 450, 230, 112, "255 255 255");
-    text("Nivel de cumplimiento", 70, 412, 10, "F2", "71 85 105");
-    text(`${payload.result.globalScore}/100`, 70, 372, 34, "F2", tone.rgb);
-    text(`Clasificación: ${payload.result.classification.label}`, 70, 344, 11, "F2", "15 23 42");
+    text(diagnosticTranslate("Nivel de cumplimiento"), 70, 412, 10, "F2", "71 85 105");
+    text(diagnosticTranslate(`${payload.result.globalScore}/100`), 70, 372, 34, "F2", tone.rgb);
+    text(diagnosticTranslate(`Clasificación: ${payload.result.classification.label}`), 70, 344, 11, "F2", "15 23 42");
 
     rect(300, 450, 247, 112, "255 255 255");
-    text("Resumen ejecutivo", 322, 412, 10, "F2", "71 85 105");
+    text(diagnosticTranslate("Resumen ejecutivo"), 322, 412, 10, "F2", "71 85 105");
     paragraph(tone.summary, 322, 390, 38, 10, 15, "F1", "51 65 85");
 
     y = 280;
-    text("Este informe es una evaluación preliminar orientada a priorizar acciones de prevención legal.", margin, y, 10, "F1", "51 65 85");
+    text(diagnosticTranslate("Este informe es una evaluación preliminar orientada a priorizar acciones de prevención legal."), margin, y, 10, "F1", "51 65 85");
     y -= 18;
-    text("No sustituye el asesoramiento jurídico individualizado ni una auditoría completa.", margin, y, 10, "F1", "51 65 85");
+    text(diagnosticTranslate("No sustituye el asesoramiento jurídico individualizado ni una auditoría completa."), margin, y, 10, "F1", "51 65 85");
 
     newPage();
     sectionTitle("01", "Resumen ejecutivo");
@@ -643,10 +644,10 @@ if (diagnosticApp) {
     sectionTitle("02", "Scoring por áreas");
     payload.result.areaScores.forEach((item) => {
       ensureSpace(34);
-      text(item.area, margin, y, 10, "F2", "15 23 42");
+      text(diagnosticTranslate(item.area), margin, y, 10, "F2", "15 23 42");
       rect(230, y + 7, 230, 9, "226 232 240");
       rect(230, y + 7, Math.max(4, (item.score / 100) * 230), 9, item.score >= 80 ? "22 163 74" : item.score >= 60 ? "245 158 11" : "220 38 38");
-      text(`${item.score}/100`, 480, y, 10, "F2", "15 23 42");
+      text(diagnosticTranslate(`${item.score}/100`), 480, y, 10, "F2", "15 23 42");
       y -= 25;
     });
 
@@ -655,10 +656,10 @@ if (diagnosticApp) {
     critical.slice(0, 3).forEach((area, index) => {
       ensureSpace(96);
       rect(margin, y + 16, 499, 78, index === 0 ? "239 246 255" : "248 250 252");
-      text(`${index + 1}. ${area.area}`, margin + 16, y - 8, 12, "F2", "15 23 42");
+      text(diagnosticTranslate(`${index + 1}. ${area.area}`), margin + 16, y - 8, 12, "F2", "15 23 42");
       y -= 28;
       recommendedActions(area).forEach((action) => {
-        text(`- ${action}`, margin + 20, y, 8.8, "F1", "51 65 85");
+        text(diagnosticTranslate(`- ${action}`), margin + 20, y, 8.8, "F1", "51 65 85");
         y -= 13;
       });
       y -= 13;
@@ -731,7 +732,7 @@ if (diagnosticApp) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `legal-prevent-informe-diagnostico-${Date.now()}.pdf`;
+    link.download = document.documentElement.lang === "en" ? `legal-prevent-assessment-${Date.now()}.pdf` : `legal-prevent-informe-diagnostico-${Date.now()}.pdf`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -750,7 +751,7 @@ if (diagnosticApp) {
   document.querySelector("[data-run-scoring]")?.addEventListener("click", () => {
     if (Object.keys(state.answers).length < diagnosticQuestions.length) {
       const missing = diagnosticQuestions.length - Object.keys(state.answers).length;
-      alert(`Faltan ${missing} preguntas por responder.`);
+      alert(document.documentElement.lang === "en" ? `${missing} questions left to answer.` : `Faltan ${missing} preguntas por responder.`);
       return;
     }
     const result = calculateResult();
