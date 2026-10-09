@@ -1,0 +1,6 @@
+# El CRM no se bloquea aquí a propósito: lleva <meta name="robots" content="noindex">
+# y los buscadores tienen que poder leerlo. robots.txt no protege el acceso.
+User-agent: *
+Allow: /
+
+Sitemap: https://legalprevent.com/sitemap.xml

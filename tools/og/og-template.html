@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Plantilla de las imágenes Open Graph (1200×630). No se publica.
+     Regenerar: tools/og/render.sh  (Chrome headless, solo en local). -->
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;800&display=block" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0}
+html,body{width:1200px;height:630px;overflow:hidden}
+body{font-family:Inter,sans-serif;color:#0f172a;position:relative;
+ background:radial-gradient(circle at 18% 0%,rgba(30,94,255,.14),transparent 520px),
+ radial-gradient(circle at 100% 100%,rgba(30,94,255,.10),transparent 560px),
+ linear-gradient(180deg,#fff 0%,#f8fafc 100%)}
+.grid{position:absolute;inset:0;background-image:linear-gradient(rgba(30,94,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(30,94,255,.05) 1px,transparent 1px);background-size:42px 42px;mask-image:radial-gradient(circle at 50% 45%,#000 0,transparent 75%)}
+.bar{position:absolute;left:0;right:0;bottom:0;height:10px;background:linear-gradient(90deg,#1e5eff 0 70%,#0f172a 70% 100%)}
+.wrap{position:relative;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 90px 30px}
+.brand{display:flex;align-items:center;gap:22px;margin-bottom:46px}
+/* Logotipo: favicon.svg (mismo dibujo que .brand-mark de styles.css) */
+.brand img{width:96px;height:96px;filter:drop-shadow(0 18px 30px rgba(30,94,255,.22))}
+.word{font-size:50px;font-weight:800;letter-spacing:-.01em}
+h1{font-size:58px;line-height:1.08;font-weight:800;letter-spacing:-.02em;max-width:1000px}
+h1 em{font-style:normal;color:#1e5eff}
+p{margin-top:24px;font-size:27px;line-height:1.35;color:#475569;font-weight:500;max-width:900px}
+.foot{position:absolute;bottom:34px;left:0;right:0;display:flex;justify-content:center;gap:14px;font-size:21px;font-weight:600;color:#1e5eff}
+.foot span{color:#94a3b8}
+</style></head><body><div class="grid"></div>
+<div class="wrap">
+ <div class="brand"><img src="../../favicon.svg" alt=""><div class="word">LegalPrevent</div></div>
+ <h1 id="h1"></h1><p id="p"></p>
+</div>
+<div class="foot">legalprevent.com <span>·</span> <b id="tag" style="font-weight:600"></b></div>
+<div class="bar"></div>
+<script>
+const T={
+ es:{h1:'Prevención legal y <em>cumplimiento normativo</em> para empresas',p:'Detecta riesgos, automatiza tu documentación y mantén el cumplimiento bajo control.',tag:'Empresas · Autónomos · Gestorías · Despachos'},
+ en:{h1:'Regulatory <em>compliance</em> for companies doing business in Spain',p:'Identify legal risks early, automate documentation and keep compliance under control.',tag:'Companies · Founders · Advisory firms'}};
+const t=T[new URLSearchParams(location.search).get('lang')]||T.es;
+h1.innerHTML=t.h1;p.textContent=t.p;tag.textContent=t.tag;
+</script></body></html>

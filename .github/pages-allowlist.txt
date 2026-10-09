@@ -2,6 +2,13 @@
 index.html
 styles.css
 script.js
+# SEO, Open Graph y favicon (fase 1 PV-WEB-I18N-OG-001)
+robots.txt
+sitemap.xml
+favicon.ico
+favicon.svg
+apple-touch-icon.png
+assets/og/og-es-v1.jpg
 # Asistente Escudito (PR2f): inactivo para visitantes mientras PUBLIC_LAUNCHER=false
 agent-widget.js
 agent-widget.css
