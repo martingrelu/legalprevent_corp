@@ -37,3 +37,12 @@ crm/src/styles.css
 docs/pr2/eval/bateria-v1.json
 # Dominio (inofensivo; el dominio real lo fija Settings → Pages)
 CNAME
+
+# English corporate website (phase 2)
+en/index.html
+en/partner/index.html
+en/diagnostico/index.html
+en/gracias/index.html
+assets/og/og-en-v1.jpg
+i18n/en-runtime.js
+language.js
