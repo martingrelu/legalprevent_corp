@@ -20,7 +20,7 @@ import {
   statementFor,
   verifySignedApprovals,
 } from "../seo-engine/approval-signature.mjs";
-import { assertInteractive, createRecord } from "../seo-engine/approve.mjs";
+import { assertInteractive, assertTimestampAfterLastRecord, createRecord } from "../seo-engine/approve.mjs";
 
 const work = mkdtempSync(join(tmpdir(), "lp-sig-test-"));
 after(() => rmSync(work, { recursive: true, force: true }));
@@ -203,12 +203,102 @@ test("createRecord firma, verifica antes de escribir y no sobrescribe registros"
   assert.equal(evaluate(art, loadRecords(join(root, "content/blog/approvals"), "tema-real")).ok, true);
   assert.equal(record.identity, ID);
 
-  assert.throws(() => createRecord({ ...params, sign: (s) => signStatement(s, keyA.priv) }), /EEXIST|file already exists/i);
+  // Repetir en el mismo instante ya no llega a firmar: el orden sería ambiguo.
+  let firmas = 0;
+  const contar = (s) => (firmas++, signStatement(s, keyA.priv));
+  assert.throws(() => createRecord({ ...params, sign: contar }), /no es posterior a la del último registro/);
+  assert.equal(firmas, 0, "no se firma (ni se pide la contraseña) si el orden sería ambiguo");
   assert.throws(
     () => createRecord({ ...params, now: new Date("2026-10-21T10:05:00Z"), sign: (s) => signStatement(s, keyB.priv) }),
     /la firma generada no valida/
   );
   assert.equal(loadRecords(join(root, "content/blog/approvals"), "tema-real").length, 1, "una firma inválida no deja ningún fichero");
+});
+
+// ---- Orden inequívoco entre aprobación, revocación y restauración -----------------------
+function newRoot(name) {
+  const root = join(work, name);
+  mkdirSync(join(root, "seo-engine"), { recursive: true });
+  writeFileSync(join(root, "seo-engine/allowed_signers"), keyA.allowed);
+  return root;
+}
+const sha = (art) => contentHash(art.meta, art.body);
+const at = (time) => new Date(`2026-10-21T${time}Z`);
+const records = (root) => loadRecords(join(root, "content/blog/approvals"), "tema-real");
+const sign = (action, root, art, now, spy) =>
+  createRecord({ root, slug: art.meta.slug, action, sha256: sha(art), identity: ID, now, sign: (s) => (spy && spy.count++, signStatement(s, keyA.priv)) });
+
+test("aprobación, revocación y restauración con marcas estrictamente crecientes", () => {
+  const root = newRoot("repo-order-ok");
+  const art = article();
+  sign("approve", root, art, at("10:00:00"));
+  assert.equal(evaluate(art, records(root)).ok, true, "aprobado");
+  sign("revoke", root, art, at("10:30:00"));
+  assert.match(evaluate(art, records(root)).reason, /revocada/);
+  sign("approve", root, art, at("11:00:00")); // restauración de la autorización
+  assert.equal(evaluate(art, records(root)).ok, true, "restaurado");
+  assert.equal(records(root).length, 3);
+  assert.deepEqual(records(root).map((r) => r.file), records(root).map((r) => r.file).sort(), "el orden de los nombres coincide con el cronológico");
+});
+
+test("restaurar el contenido firmado vuelve a aprobarlo; alterarlo lo invalida", () => {
+  const root = newRoot("repo-restore");
+  const original = article();
+  sign("approve", root, original, at("10:00:00"));
+  const alterado = article({}, BODY + " Cambio posterior.");
+  assert.equal(evaluate(alterado, records(root)).ok, false, "contenido alterado");
+  assert.equal(evaluate(original, records(root)).ok, true, "contenido restaurado");
+});
+
+test("se rechaza firmar con una marca igual o anterior a la del último registro, sin firmar nada", () => {
+  const root = newRoot("repo-order-bad");
+  const art = article();
+  sign("approve", root, art, at("10:00:00"));
+  const spy = { count: 0 };
+  for (const [etiqueta, hora] of [["mismo segundo", "10:00:00"], ["reloj atrasado", "09:59:59"], ["reloj muy atrasado", "08:00:00"]]) {
+    assert.throws(() => sign("revoke", root, art, at(hora), spy), /no es posterior a la del último registro/, etiqueta);
+  }
+  assert.equal(spy.count, 0, "nunca se llega a firmar");
+  assert.equal(records(root).length, 1, "no se escribe ningún fichero");
+  assert.equal(evaluate(art, records(root)).ok, true, "la aprobación sigue intacta");
+  sign("revoke", root, art, at("10:00:01"), spy); // un segundo después sí es válido
+  assert.match(evaluate(art, records(root)).reason, /revocada/);
+});
+
+test("la comparación es con el registro MÁS RECIENTE, no con el primero ni con el más antiguo", () => {
+  const root = newRoot("repo-order-latest");
+  const art = article();
+  sign("approve", root, art, at("10:00:00"));
+  sign("revoke", root, art, at("11:00:00"));
+  // 10:30 es posterior al primer registro pero anterior al último: debe rechazarse.
+  assert.throws(() => sign("approve", root, art, at("10:30:00")), /posterior a la del último registro \(2026-10-21T11:00:00Z/);
+  assert.throws(() => sign("approve", root, art, at("11:00:00")), /no es posterior/);
+  assert.equal(records(root).length, 2);
+  sign("approve", root, art, at("11:00:01"));
+  assert.equal(evaluate(art, records(root)).ok, true);
+});
+
+test("el orden estricto vale para todo el artículo, también con otro contenido", () => {
+  const root = newRoot("repo-order-other-hash");
+  const v1 = article();
+  const v2 = article({}, BODY + " v2");
+  sign("approve", root, v1, at("10:00:00"));
+  assert.throws(() => sign("approve", root, v2, at("09:00:00")), /no es posterior/);
+  sign("approve", root, v2, at("10:00:01"));
+  assert.equal(evaluate(v2, records(root)).ok, true);
+});
+
+test("un registro existente ilegible o sin marca válida bloquea la firma", () => {
+  const root = newRoot("repo-order-corrupt");
+  const art = article();
+  const dir = join(root, "content/blog/approvals/tema-real");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "roto.json"), "{no es json");
+  assert.throws(() => sign("approve", root, art, at("10:00:00")), /no es legible/);
+  writeFileSync(join(dir, "roto.json"), JSON.stringify({ timestamp: "ayer" }));
+  assert.throws(() => sign("approve", root, art, at("10:00:00")), /marca de tiempo válida/);
+  assert.throws(() => assertTimestampAfterLastRecord(root, "tema-real", "2026-10-21T10:00:00Z"), /marca de tiempo válida/);
+  assert.doesNotThrow(() => assertTimestampAfterLastRecord(root, "otro-articulo", "2026-10-21T10:00:00Z"), "otros artículos no se ven afectados");
 });
 
 test("approve.mjs exige una terminal interactiva y no se ejecuta en CI", () => {
