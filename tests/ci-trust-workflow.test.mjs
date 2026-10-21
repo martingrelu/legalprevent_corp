@@ -17,7 +17,7 @@ const trustRaw = read("blog-trust.yml");
 // Se analiza el código, no los comentarios (que explican las reglas y mencionan las palabras que se prohíben).
 const trust = trustRaw.replace(/^\s*#.*$/gm, "").replace(/\s+#[^\n"']*$/gm, "");
 const workflows = readdirSync(dir).filter((name) => name.endsWith(".yml"));
-const job = (name) => trust.split(/^  (?=[a-z]+:\n)/m).find((block) => block.startsWith(`${name}:`));
+const job = (name) => trust.split(/^  (?=[a-z-]+:\n)/m).find((block) => block.startsWith(`${name}:`));
 // Todas las líneas de comandos que ejecuta el workflow (run de una línea y de varias).
 const commandLines = [];
 for (const match of trust.matchAll(/^\s+run: (\|\n((?:\s{10}.+\n)+)|.+\n)/gm)) {
@@ -36,14 +36,14 @@ test("solo blog-trust.yml usa pull_request_target; el resto de workflows no", ()
 
 test("el único checkout es el de la rama base, fijado por su SHA, sin credenciales persistentes", () => {
   const checkouts = [...trust.matchAll(/uses: actions\/checkout@([^\s]+)[^\n]*\n\s+with:\n((?:\s{10}.+\n)+)/g)];
-  assert.equal(checkouts.length, 2, "uno por job");
+  assert.equal(checkouts.length, 3, "uno por job");
   for (const [, version, withBlock] of checkouts) {
     assert.match(version, /^[0-9a-f]{40}$/, "acción fijada por SHA");
     assert.match(withBlock, /ref: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/, "se extrae la rama base");
     assert.match(withBlock, /persist-credentials: false/);
     assert.doesNotMatch(withBlock, /head\.sha|head\.ref|head\.repo|merge|repository:|token:|path:/, "nada del PR en el checkout");
   }
-  assert.equal(trust.match(/actions\/checkout@/g).length, 2);
+  assert.equal(trust.match(/actions\/checkout@/g).length, 3);
 });
 
 test("no se ejecuta nada que venga del PR: ni acciones propias, ni dependencias, ni scripts de otra ruta", () => {
@@ -52,8 +52,8 @@ test("no se ejecuta nada que venga del PR: ni acciones propias, ni dependencias,
   assert.doesNotMatch(trust, /uses: \.\//, "sin acciones locales (las del PR)");
   assert.doesNotMatch(trust.replace(/^\s*#.*$/gm, ""), /\b(npm|npx|yarn|pnpm|pip|bundle|cargo|make|bash|sh)\b\s|setup-node|cache:|node_modules|package\.json|\.npmrc/);
   const commands = [...trust.matchAll(/^\s+run: node (seo-engine\/ci\/[a-z-]+\.mjs)$/gm)].map((m) => m[1]);
-  assert.deepEqual(commands.sort(), ["seo-engine/ci/check-citations.mjs", "seo-engine/ci/check-separation.mjs"]);
-  assert.ok(commandLines.length >= 6);
+  assert.deepEqual(commands.sort(), ["seo-engine/ci/check-citations.mjs", "seo-engine/ci/check-separation.mjs", "seo-engine/ci/check-sources-live.mjs"]);
+  assert.ok(commandLines.length >= 9);
   assert.ok(commandLines.every((line) => /^node( |$)/.test(line)), `solo se ejecuta node: ${commandLines.filter((l) => !/^node( |$)/.test(l))}`);
   assert.ok(commandLines.every((line) => !/[;&|`$<>]|\$\(/.test(line.replace(/'process\.exit\(Number\(process\.versions\.node\.split\("\."\)\[0\]\) >= 20 \? 0 : 1\)'/, ""))), "sin operadores de shell");
 });
@@ -62,7 +62,7 @@ test("sin secretos, sin token de la API y con permisos de solo lectura", () => {
   assert.doesNotMatch(trust, /secrets\.|github\.token|GITHUB_TOKEN|GH_TOKEN|id-token|environment:/);
   assert.match(trust, /^permissions: \{\}/m);
   const permissions = [...trust.matchAll(/^\s+([a-z-]+): (read|write|none)\s*(?:#.*)?$/gm)];
-  assert.equal(permissions.length, 2, "uno por job");
+  assert.equal(permissions.length, 3, "uno por job");
   for (const [, scope, level] of permissions) assert.deepEqual([scope, level], ["contents", "read"]);
   assert.doesNotMatch(trust, /: write\b|pull-requests|statuses|checks|actions:|deployments|issues:|packages:/);
 });
@@ -82,15 +82,15 @@ test("ningún dato del PR se interpola en un `run`: solo llegan por variables de
   assert.doesNotMatch(trust, /pull_request\.(title|body|labels)|head_ref|head\.label|head\.repo|\.commits|comment|pull_request_review/);
   // Las variables de entorno solo se pasan a los scripts de confianza.
   const envBlocks = [...trust.matchAll(/env:\n((?:\s{10}.+\n)+)\s{8}run: (.+)/g)];
-  assert.equal(envBlocks.length, 2);
-  for (const [, , command] of envBlocks) assert.match(command, /^node seo-engine\/ci\/check-(separation|citations)\.mjs$/);
+  assert.equal(envBlocks.length, 3);
+  for (const [, , command] of envBlocks) assert.match(command, /^node seo-engine\/ci\/check-(separation|citations|sources-live)\.mjs$/);
 });
 
 test("cada job pide solo lo suyo y tiene tiempo límite; los nombres son los de los checks obligatorios", () => {
-  for (const name of ["separation", "citations"]) {
+  for (const name of ["separation", "citations", "sources-live"]) {
     const block = job(name);
     assert.match(block, new RegExp(`name: ${name}\\n`));
-    assert.match(block, /timeout-minutes: 10/);
+    assert.match(block, /timeout-minutes: (10|15)/);
     assert.match(block, /permissions:\n\s+contents: read/);
     assert.match(block, /runs-on: ubuntu-24\.04/);
   }
@@ -104,4 +104,13 @@ test("el workflow de producción y la allowlist no cambian ni mencionan los cont
   assert.doesNotMatch(pages, /blog-trust|seo-engine|content\//);
   const allowlist = readFileSync(new URL("../.github/pages-allowlist.txt", import.meta.url), "utf8");
   assert.doesNotMatch(allowlist, /blog-trust|seo-engine|content\/|\.github/);
+});
+
+test("sources-live: modo estricto y reintentos fijados en el workflow; solo ese job tiene salida a la red por diseño", () => {
+  const live = job("sources-live");
+  assert.match(live, /LIVE_MODE: strict/);
+  assert.match(live, /LIVE_ATTEMPTS: "3"/);
+  assert.doesNotMatch(live, /LIVE_MODE: informative/);
+  // Los otros dos controles no reciben variables de la comprobación en vivo.
+  for (const name of ["separation", "citations"]) assert.doesNotMatch(job(name), /LIVE_/);
 });

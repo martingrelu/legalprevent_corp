@@ -75,3 +75,31 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           FETCH_PR: "1"
         run: node seo-engine/ci/check-citations.mjs
+
+  sources-live:
+    name: sources-live
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read       # solo leer el repositorio; sin escritura, sin token de la API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Comprobar versión de Node
+        run: |
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+
+      - name: Citas en vivo (solo lectura de www.boe.es, www.aepd.es y www.insst.es; modo estricto)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FETCH_PR: "1"
+          LIVE_MODE: strict
+          LIVE_ATTEMPTS: "3"
+        run: node seo-engine/ci/check-sources-live.mjs

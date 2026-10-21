@@ -57,10 +57,10 @@ export class Report {
 }
 
 // Ejecuta un control. Cualquier excepción es un FALLO (falla cerrado): nunca un éxito silencioso.
-export function runCheck(title, check) {
+export async function runCheck(title, check) {
   const report = new Report(title);
   try {
-    check(report);
+    await check(report);
     report.flush(report.failed ? "FALLO" : "CORRECTO");
     process.exit(report.failed ? 1 : 0);
   } catch (error) {
