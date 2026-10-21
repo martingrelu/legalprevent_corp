@@ -137,3 +137,25 @@ permite aprobar la propia PR, por eso este modo no sirve para el flujo actual.
 ## 11. Fuera de alcance de esta fase
 
 Registro de fuentes jurídicas, verificador de citas, generación con IA y la cuenta de bot que abre los borradores.
+
+## Verificación de citas antes de firmar (F2.4)
+
+`node seo-engine/approve.mjs <slug>` ya **no firma** una aprobación si las citas del artículo no superan esta puerta
+(`seo-engine/approval-gate.mjs`), antes de pedir las confirmaciones:
+
+1. **Offline:** candado, registro de fuentes, tipos y vinculación, reconocimientos de revisión, referencias sin cita. Si falla,
+   no se sale a la red.
+2. **En vivo, estricto, con reintentos:** cada cita contra su fuente (BOE, AEPD, INSST) y su candado. Todo lo que no sea
+   «coincide» bloquea.
+3. Si una fuente de la AEPD o del INSST no responde, la puerta sugiere `node seo-engine/except.mjs <slug> <cita>`. Con una
+   excepción firmada y vigente (F2.3c) la cita queda en `REVISION_EXCEPCIONAL` y la firma exige **escribir `EXCEPCIONAL`**
+   además del hash. El BOE nunca admite excepción.
+
+Reglas añadidas: una aprobación se firma **siempre sobre el contenido actual** (`--sha256` solo vale para revocar); cualquier
+error técnico de la puerta es un «no firmar»; la puerta es de solo lectura (no escribe nada, ni siquiera si falla).
+
+**Qué es y qué no es.** Es un cinturón de seguridad para el responsable: evita firmar lo que el CI va a rechazar. No es el
+control de fondo: ese lo dan `citations` y `sources-live` (desde la rama base) y la firma. La revocación no pasa por la puerta.
+
+**Corrección incluida:** `approve.mjs` decidía si ejecutarse comparando su ruta sin resolver enlaces simbólicos; con un enlace
+salía con 0 **sin hacer nada** (parecía que se había firmado). Ahora compara la ruta real, igual que `except.mjs`.

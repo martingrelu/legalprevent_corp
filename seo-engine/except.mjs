@@ -8,7 +8,7 @@
 //
 // Escribe content/blog/exceptions/<slug>/<fecha>-<grant|revoke>-<hash8>.json; después hay que commitearlo.
 // No modifica el artículo ni sus aprobaciones.
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -42,7 +42,8 @@ export function prepare({ root, slug, citationId, action, now = new Date() }) {
   return { meta, binding: grants[0].binding, entry, citation };
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+// Se compara con la ruta REAL: con un enlace simbólico la comparación fallaba y el script salía con 0 sin hacer nada.
+const isMain = Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
 if (isMain) {
   try {
     assertInteractive();
