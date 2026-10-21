@@ -1,0 +1,72 @@
+{
+  "status": {
+    "code": "200",
+    "text": "ok"
+  },
+  "data": [
+    {
+      "bloque": [
+        {
+          "id": "pr",
+          "titulo": "[preambulo]",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/pr"
+        },
+        {
+          "id": "ti",
+          "titulo": "TÍTULO I",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/ti"
+        },
+        {
+          "id": "a1",
+          "titulo": "Artículo 1",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a1"
+        },
+        {
+          "id": "a2",
+          "titulo": "Artículo 2",
+          "fecha_actualizacion": "20210527",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a2"
+        },
+        {
+          "id": "a3",
+          "titulo": "Artículo 3",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a3"
+        },
+        {
+          "id": "ti-2",
+          "titulo": "TÍTULO II",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/ti-2"
+        },
+        {
+          "id": "a4",
+          "titulo": "Artículo 4",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a4"
+        },
+        {
+          "id": "a5",
+          "titulo": "Artículo 5",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a5"
+        },
+        {
+          "id": "a6",
+          "titulo": "Artículo 6",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a6"
+        },
+        {
+          "id": "a7",
+          "titulo": "Artículo 7",
+          "fecha_actualizacion": "20181206",
+          "url": "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id/BOE-A-2018-16673/texto/bloque/a7"
+        }
+      ]
+    }
+  ]
+}
