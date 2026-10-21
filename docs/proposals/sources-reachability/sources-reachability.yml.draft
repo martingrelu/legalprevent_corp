@@ -1,0 +1,18 @@
+# BORRADOR (D5): NO está activo. Para activarlo hace falta autorización y renombrarlo a .github/workflows/sources-reachability.yml
+name: Sources reachability (informativo)
+on:
+  workflow_dispatch: {}
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Medir accesibilidad de AEPD e INSST
+        run: node docs/proposals/sources-reachability/probe.mjs
