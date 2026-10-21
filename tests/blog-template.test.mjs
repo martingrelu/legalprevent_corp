@@ -250,11 +250,23 @@ test("sin artículos aprobados no se genera ni el índice", () => {
 });
 
 test("la CLI solo lee content/blog: el fixture no está ahí ni se publica", () => {
-  assert.deepEqual(
-    [...renderAll(loadArticles(new URL("../content/blog", import.meta.url).pathname)).keys()].filter((p) => p !== "blog/index.html"),
-    []
-  );
+  // No asume que content/blog esté vacío: con artículos reales aprobados también debe pasar.
+  const articles = loadArticles(new URL("../content/blog", import.meta.url).pathname);
+  assert.equal(articles.some(({ meta }) => meta.fixture === true || meta.slug === fixture.meta.slug), false);
+  const outputs = [...renderAll(articles).keys()].filter((p) => p !== "blog/index.html").sort();
+  const expected = articles
+    .filter(({ meta }) => meta.review_status === "approved")
+    .map(({ meta }) => `blog/${meta.slug}/index.html`)
+    .sort();
+  assert.deepEqual(outputs, expected, "solo salen artículos aprobados de content/blog");
+  assert.equal(outputs.some((p) => p.includes(fixture.meta.slug)), false);
   assert.throws(() => read("content/blog/articulo-de-prueba.md"));
+});
+
+test("con artículos reales aprobados en content/blog, la salida pública sigue siendo solo la de los aprobados", () => {
+  const borrador = article({ slug: "borrador-secreto" }, "x", { approved: false });
+  const outputs = [...renderAll([fixture, article(), borrador]).keys()].sort();
+  assert.deepEqual(outputs, ["blog/index.html", "blog/tema-real/index.html"]);
 });
 
 test("la allowlist de Pages nunca incluye el fixture, tests, seo-engine ni content", () => {
