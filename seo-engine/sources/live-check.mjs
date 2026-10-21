@@ -7,11 +7,15 @@
 //   contradicted la fuente contradice la cita o el candado (cita no encontrada, derogada, candado inconsistente, registro modificado…).
 //   unreachable  no se pudo concluir tras los reintentos (red, 5xx, 429/403, soft-block, timeout). Nunca es válida.
 //   unchecked    la cita no se pudo comprobar por una falta propia (sin candado, fuente desconocida, cita inválida).
+//   exceptional_review  (REVISION_EXCEPCIONAL) `unreachable` de AEPD/INSST cubierto por una excepción FIRMADA y vigente (F2.3c).
+//                solo transforma `unreachable`; nunca es `confirmed` ni sustituye a la aprobación del artículo.
 // En modo estricto TODO lo que no sea `confirmed` bloquea. `exceptionable` marca lo que una excepción firmada futura (F2.3c)
 // podría cubrir: solo `unreachable` de AEPD/INSST. El BOE inconcluso bloquea siempre y nunca es excepcionable.
 import { compareWithLock, verifyBoeCitation } from "./adapters/boe.mjs";
 import { compareWebWithLock, verifyWebCitation } from "./adapters/web.mjs";
 import { FAILED_REASONS, citationProblems } from "./schema.mjs";
+import { EXCEPTION_STATE, evaluateException } from "./exceptions.mjs";
+import { verifyArticleCitations } from "./verify-citations.mjs";
 
 export const MAX_ATTEMPTS = 5;
 export const DEFAULT_RETRY = { attempts: 3, baseMs: 2000, maxMs: 20_000 };
@@ -61,23 +65,42 @@ export async function liveCheckCitation({ entry, citation, boe, web, now = new D
   return { ...classify(done.result, citation, entry), detail: done.result.detail, attempts: done.attempts };
 }
 
-export async function liveCheckArticle({ meta }, registry, { boe, web, now, retry, mode = "strict" } = {}) {
+// `exceptions` (opcional): { recordsFor(slug), allowedSigners, identity, pinnedFingerprint }. Sin él no hay excepciones.
+export async function liveCheckArticle({ meta, body = "" }, registry, { boe, web, now = new Date(), retry, mode = "strict", exceptions } = {}) {
   if (!MODES.includes(mode)) throw new Error(`modo inválido: ${mode}`);
   const bySource = new Map(registry.sources.map((entry) => [entry.id, entry]));
   const citations = Array.isArray(meta.citations) ? meta.citations : [];
   const items = [];
   if (meta.review_status === "approved" && citations.length === 0) items.push({ citation: "(artículo)", source: "-", outcome: "unchecked", reasons: ["articulo_sin_citas"], attempts: 0 });
+  let offline = null;
   for (const citation of citations) {
     const entry = bySource.get(citation?.source);
     const item = await liveCheckCitation({ entry, citation: citation ?? {}, boe, web, now, retry });
-    items.push({ citation: citation?.id ?? "?", source: citation?.source ?? "-", authority: entry?.authority, ...item });
+    const out = { citation: citation?.id ?? "?", source: citation?.source ?? "-", authority: entry?.authority, ...item };
+    if (exceptions && out.outcome === "unreachable" && out.exceptionable === true) {
+      try {
+        offline ??= verifyArticleCitations({ meta, body }, registry, { now });
+        const verdict = evaluateException({
+          meta, body, citation, entry,
+          offlineItem: offline.items.find((i) => i.citation === citation.id),
+          records: exceptions.recordsFor(meta.slug),
+          allowedSigners: exceptions.allowedSigners, identity: exceptions.identity, pinnedFingerprint: exceptions.pinnedFingerprint, now,
+        });
+        if (verdict.status === EXCEPTION_STATE) Object.assign(out, { outcome: "exceptional_review", exception: { issued_at: verdict.issued_at, expires_at: verdict.expires_at } });
+        else out.exceptionDenied = verdict.reasons;
+      } catch (error) {
+        out.exceptionDenied = [`error:${String(error?.message ?? error)}`]; // un error al evaluar la excepción NUNCA la concede
+      }
+    }
+    items.push(out);
   }
-  for (const item of items) item.blocking = mode === "strict" && item.outcome !== "confirmed";
+  for (const item of items) item.blocking = mode === "strict" && item.outcome !== "confirmed" && item.outcome !== "exceptional_review";
   return { slug: meta.slug, mode, items, blocking: items.some((item) => item.blocking) };
 }
 
+const LABEL = { exceptional_review: EXCEPTION_STATE };
 export const formatLiveItem = (item) =>
-  `${item.outcome.toUpperCase().padEnd(12)} ${item.citation} (${item.source})${item.reasons?.length ? ` — ${item.reasons.join(", ")}` : ""}${item.attempts > 1 ? ` [${item.attempts} intentos]` : ""}${item.exceptionable ? " [excepcionable con firma]" : ""}`;
+  `${(LABEL[item.outcome] ?? item.outcome.toUpperCase()).padEnd(12)} ${item.citation} (${item.source})${item.reasons?.length ? ` — ${item.reasons.join(", ")}` : ""}${item.attempts > 1 ? ` [${item.attempts} intentos]` : ""}${item.exception ? ` [documentada por el responsable; caduca ${item.exception.expires_at}; NO verificada]` : item.exceptionable ? " [excepcionable con firma]" : ""}`;
 
 // Para tests y documentación: los motivos que nunca deben producir `confirmed`.
 export const NEVER_CONFIRMED = FAILED_REASONS;

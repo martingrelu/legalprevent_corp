@@ -3,12 +3,11 @@
 // Se ejecuta con el código de la rama base; el PR se lee como datos (ver check-citations.mjs). Modo estricto por defecto.
 //
 // Variables: las de check-separation + LIVE_MODE=strict|informative (por defecto strict) y LIVE_ATTEMPTS (1..5, por defecto 3).
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 import { parseSource } from "../blog-render.mjs";
-import { readContext, runCheck } from "./common.mjs";
+import { TRUSTED_ROOT, humanLogin, readContext, runCheck } from "./common.mjs";
 import { assertCommit, changedFiles, fetchPullHead, materializeData } from "./safe-git.mjs";
 import { safeText } from "./sanitize.mjs";
 import { createBoeClient } from "../sources/adapters/boe.mjs";
@@ -16,12 +15,14 @@ import { createWebClient } from "../sources/adapters/web.mjs";
 import { HOSTS, assertRegistry, registryEntryHash, urlProblem } from "../sources/schema.mjs";
 import { ARTICLE_PATH } from "../sources/separation.mjs";
 import { MODES, formatLiveItem, liveCheckArticle } from "../sources/live-check.mjs";
+import { loadRecords } from "../sources/exceptions.mjs";
 
 const REGISTRY_PATH = "content/sources/registry.json";
-const allowed = (path) => ARTICLE_PATH.test(path) || path === REGISTRY_PATH;
+const EXCEPTION_PATH = /^content\/blog\/exceptions\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d{8}T\d{6}Z-(?:grant|revoke)-[0-9a-f]{8}\.json$/;
+const allowed = (path) => ARTICLE_PATH.test(path) || path === REGISTRY_PATH || EXCEPTION_PATH.test(path);
 const MAX_CITATIONS = 40; // presupuesto de tiempo del job; superarlo FALLA (nunca se omite en silencio)
 
-export function liveContext(env = process.env) {
+function liveContext(env = process.env) {
   const mode = env.LIVE_MODE ?? "strict";
   if (!MODES.includes(mode)) throw new Error(`LIVE_MODE inválido: ${safeText(mode, 40)}`);
   const attempts = env.LIVE_ATTEMPTS === undefined ? 3 : Number(env.LIVE_ATTEMPTS);
@@ -34,7 +35,9 @@ function readRegistry(repoDir, rev, dir) {
   return written.includes(REGISTRY_PATH) ? assertRegistry(JSON.parse(readFileSync(join(dir, REGISTRY_PATH), "utf8"))) : null;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// Se ejecuta SIEMPRE al cargar el script (como los demás controles): una comprobación de "soy el programa principal" podía
+// dejar el job en verde sin comprobar nada si la ruta se resolvía distinto (enlaces simbólicos).
+{
   runCheck("sources-live", async (report) => {
     const ctx = readContext();
     const { mode, attempts } = liveContext();
@@ -82,13 +85,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         if (!HOSTS[entry.authority]) throw new Error(`${safeText(entry.id)}: autoridad desconocida`);
       }
 
+      // Excepciones firmadas (F2.3c): los registros salen del PR (datos); la CLAVE sale de la rama base (código de confianza) y su
+      // huella de la variable de Actions fijada fuera del repositorio. Sin cualquiera de las dos, no hay excepciones.
+      const signersPath = join(TRUSTED_ROOT, "seo-engine/allowed_signers");
+      const pinned = process.env.BLOG_APPROVER_FINGERPRINT ?? "";
+      const exceptions = existsSync(signersPath) && pinned
+        ? { recordsFor: (slug) => loadRecords(join(headDir, "content/blog/exceptions"), slug), allowedSigners: readFileSync(signersPath, "utf8"), identity: humanLogin(), pinnedFingerprint: pinned }
+        : undefined;
+      report.row(["excepciones firmadas", exceptions ? "disponibles" : "no disponibles (falta allowed_signers de la base o la huella fijada)"]);
+      report.info(exceptions ? "Excepciones firmadas: disponibles (clave de la rama base, huella fijada)." : "Excepciones firmadas: no disponibles (falta allowed_signers de la rama base o la huella fijada): ninguna excepción se aplica.");
+
       const boe = createBoeClient();
       const web = createWebClient();
       for (const article of scope) {
-        const result = await liveCheckArticle(article, registry, { boe, web, retry: { attempts }, mode });
+        const result = await liveCheckArticle(article, registry, { boe, web, retry: { attempts }, mode, exceptions });
         report.row([article.meta.slug, result.blocking ? "BLOQUEA" : "ok"]);
         for (const item of result.items) {
-          if (item.outcome === "confirmed") report.info(`${article.meta.slug}: ${formatLiveItem(item)}`);
+          if (item.outcome === "exceptional_review") report.warn(`${safeText(article.meta.slug)}: ${safeText(formatLiveItem(item), 260)}`);
+          else if (item.outcome === "confirmed") report.info(`${article.meta.slug}: ${formatLiveItem(item)}`);
           else if (item.blocking) report.problem(`${safeText(article.meta.slug)}: ${safeText(formatLiveItem(item), 260)}`);
           else report.warn(`${safeText(article.meta.slug)}: ${safeText(formatLiveItem(item), 260)} (modo informativo: NO verificado)`);
         }

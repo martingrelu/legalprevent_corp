@@ -76,6 +76,7 @@ test("ningún dato del PR se interpola en un `run`: solo llegan por variables de
     "github.event.pull_request.head.sha",
     "github.event.pull_request.user.login",
     "github.event.pull_request.head.ref",
+    "vars.BLOG_APPROVER_FINGERPRINT",
   ]);
   for (const expression of expressions) assert.ok(allowed.has(expression), `expresión no permitida: ${expression}`);
   // El título, el cuerpo y las etiquetas del PR no se usan nunca.
@@ -113,4 +114,12 @@ test("sources-live: modo estricto y reintentos fijados en el workflow; solo ese 
   assert.doesNotMatch(live, /LIVE_MODE: informative/);
   // Los otros dos controles no reciben variables de la comprobación en vivo.
   for (const name of ["separation", "citations"]) assert.doesNotMatch(job(name), /LIVE_/);
+});
+
+test("ningún control de seo-engine/ci puede quedar en verde sin ejecutarse: sin guardas de 'programa principal'", () => {
+  const dir = new URL("../seo-engine/ci/", import.meta.url);
+  for (const name of readdirSync(dir).filter((n) => n.endsWith(".mjs"))) {
+    const source = readFileSync(new URL(name, dir), "utf8").replace(/^\s*\/\/.*$/gm, "");
+    assert.doesNotMatch(source, /import\.meta\.url\s*===|process\.argv\[1\]/, `${name}: una guarda de este tipo falla en silencio (exit 0) si la ruta se resuelve distinto`);
+  }
 });
