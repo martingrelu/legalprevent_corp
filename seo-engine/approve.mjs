@@ -17,6 +17,7 @@ import { contentHash, parseSource } from "./blog-render.mjs";
 import {
   allowedSignersFingerprint,
   buildRecord,
+  loadRecords,
   nowTimestamp,
   recordFileName,
   signStatement,
@@ -24,9 +25,32 @@ import {
   verifyRecordSignature,
 } from "./approval-signature.mjs";
 
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+// El orden entre aprobaciones y revocaciones se decide por la marca de tiempo FIRMADA, que declara el reloj
+// de este equipo. Para que el orden no pueda quedar ambiguo (reloj atrasado, dos firmas en el mismo segundo),
+// la nueva marca debe ser ESTRICTAMENTE posterior a la del último registro del artículo; si no, no se firma nada.
+// Se comprueba antes de pedir confirmación o contraseña.
+export function assertTimestampAfterLastRecord(root, slug, timestamp) {
+  let last;
+  for (const { file, record } of loadRecords(resolve(root, "content/blog/approvals"), slug)) {
+    if (!record || !TIMESTAMP.test(record.timestamp ?? "")) {
+      throw new Error(`el registro existente ${file} no es legible o no tiene una marca de tiempo válida; resuélvelo antes de firmar`);
+    }
+    if (!last || record.timestamp > last.timestamp) last = { file, timestamp: record.timestamp };
+  }
+  if (last && timestamp <= last.timestamp) {
+    throw new Error(
+      `la hora de este equipo (${timestamp}) no es posterior a la del último registro (${last.timestamp}, ${last.file}); ` +
+        "no se firma para que el orden entre aprobación y revocación no sea ambiguo. Revisa el reloj o espera unos segundos"
+    );
+  }
+}
+
 // Crea y comprueba el registro. `sign` se inyecta para poder probarlo con claves efímeras.
 export function createRecord({ root, slug, action, sha256, identity, sign, now = new Date() }) {
   const timestamp = nowTimestamp(now);
+  assertTimestampAfterLastRecord(root, slug, timestamp); // antes de firmar: no se pide la contraseña si va a fallar
   const statement = statementFor({ action, slug, sha256, timestamp });
   const record = buildRecord({ action, slug, sha256, timestamp, identity, signature: sign(statement) });
   const allowedSigners = readFileSync(resolve(root, "seo-engine/allowed_signers"), "utf8");
@@ -67,6 +91,7 @@ if (isMain) {
       if (meta.approved_at !== today) throw new Error(`approved_at debe ser la fecha de hoy (${today}) y es ${meta.approved_at}`);
     }
 
+    assertTimestampAfterLastRecord(root, slug, nowTimestamp()); // falla pronto, antes de pedir nada
     console.log(`\n${action === "approve" ? "AUTORIZACIÓN DE PUBLICACIÓN" : "REVOCACIÓN"} — ${name} (${identity})`);
     console.log(`  Título:  ${meta.title}\n  Slug:    ${slug}\n  SHA-256: ${sha256}\n  Fuentes: ${(meta.sources ?? []).length}`);
     const rl = createInterface({ input: process.stdin, output: process.stdout });
