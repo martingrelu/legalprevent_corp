@@ -75,3 +75,13 @@ test("un front matter ilegible se rechaza, un borrador sin aprobar se puede borr
   const mixed = problems([draft(), { path: "content/sources/registry.json", before: "{}", after: "{ }" }]);
   assert.equal(mixed.length, 1, "un único cambio prohibido basta para marcar la PR entera");
 });
+
+test("un borrador generado solo puede añadir ficheros regulares: enlaces simbólicos, submódulos y ejecutables se rechazan", () => {
+  for (const mode of ["120000", "160000", "100755"]) {
+    const found = problems([{ path: "content/blog/tema.md", before: null, after: article(), mode }]);
+    assert.equal(found.length, 1, mode);
+    assert.match(found[0], new RegExp(mode));
+  }
+  assert.deepEqual(problems([{ path: "content/blog/tema.md", before: null, after: article(), mode: "100644" }]), []);
+  assert.deepEqual(problems([{ path: "content/blog/tema.md", before: article(), after: null, mode: undefined }]), [], "borrar su propio borrador no es un fichero especial");
+});

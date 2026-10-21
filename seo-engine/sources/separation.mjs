@@ -6,7 +6,9 @@
 // Los candados (`lock`) sí pueden venir de un proceso automático, porque los produce y autentica el verificador
 // contra la fuente oficial (verify-sources.mjs --check), no el modelo.
 //
-// `changes` = [{ path, before, after }] con el contenido (texto) antes y después; null si no existía o se borra.
+// `changes` = [{ path, before, after, mode }] con el contenido (texto) antes y después (null si no existía o se borra) y el
+// modo de git del fichero resultante ("100644" = fichero regular; un enlace simbólico, un submódulo o un ejecutable no
+// son un artículo).
 // Se aplica a los cambios de origen "generator". Lo integra el CI en F2.3.
 //
 // El ORIGEN se decide por el AUTOR, no por el nombre de la rama: el nombre de la rama lo elige quien abre la PR y
@@ -14,7 +16,8 @@
 import { parseRaw } from "../blog-render.mjs";
 
 export const GENERATOR_BRANCH_PREFIX = "seo/";
-const ARTICLE = /^content\/blog\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
+export const ARTICLE_PATH = /^content\/blog\/[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
+const ARTICLE = ARTICLE_PATH;
 const DRAFT_STATES = ["draft", "in_review"];
 const PROTECTED_FIELDS = ["approved_at", "approval", "review_ack"];
 
@@ -36,9 +39,13 @@ function metaOf(text) {
 export function separationProblems({ origin, changes }) {
   if (origin !== "generator") return [];
   const problems = [];
-  for (const { path, before, after } of changes) {
+  for (const { path, before, after, mode } of changes) {
     if (!ARTICLE.test(path)) {
       problems.push(`${path}: un borrador generado por IA solo puede tocar content/blog/<slug>.md`);
+      continue;
+    }
+    if (after != null && mode !== undefined && mode !== "100644") {
+      problems.push(`${path}: un borrador generado solo puede añadir ficheros regulares (modo ${mode}: enlace simbólico, submódulo o ejecutable)`);
       continue;
     }
     const was = before == null ? null : metaOf(before);
