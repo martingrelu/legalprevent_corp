@@ -132,3 +132,37 @@ forma distinta (p. ej. un enlace simbólico), el script **salía con 0 sin compr
 - Para que el CI aplique excepciones, `seo-engine/allowed_signers` tiene que estar en la rama base (hoy solo está en la rama de #29).
 - La política de qué hacer ante una indisponibilidad que supere 7 días es del responsable: hay que recalcular el candado.
 - Sin integrar en `approve.mjs` (F2.4) ni en la comprobación programada (F2.3d).
+
+## F2.3d — Comprobación programada de deriva (artículos publicados)
+
+Workflow `.github/workflows/sources-drift.yml` (`schedule` semanal, lunes 05:23 UTC, y `workflow_dispatch`) que ejecuta
+`seo-engine/ci/check-drift.mjs` sobre `main`. Responde a una pregunta distinta de `sources-live`: **¿siguen coincidiendo con sus
+fuentes oficiales las citas de los artículos ya publicados?** Es solo lectura y no autoriza nada.
+
+- **Qué hace:** para cada artículo `approved` de `content/blog/`, comprueba que su aprobación firmada sigue siendo válida
+  (clave de `allowed_signers` + huella fijada) y compara cada cita con la fuente en vivo y con su candado (misma lógica y
+  reintentos que `sources-live`).
+- **Qué NO hace:** no modifica ni despublica artículos, no abre issues ni PR, no escribe en el repositorio (`contents: read`,
+  sin secretos ni token de la API) y **no aplica excepciones firmadas** (F2.3c es para PR, no para lo ya publicado).
+- **Estado por artículo y salida del script:**
+
+  | Estado | Cuándo | Salida |
+  |---|---|---|
+  | `OK` | todas las citas coinciden con su candado y la aprobación firmada es válida | 0 |
+  | `REVISION_JURIDICA_NECESARIA` | la fuente cambió, contradice la cita, la cita no se puede comprobar o la aprobación ya no es válida | 1 |
+  | `NO_COMPROBADO` | superó el presupuesto de la ejecución (60 citas por defecto, 1–200 con `DRIFT_MAX_CITATIONS`) | 1 |
+  | `INCONCLUSO` | la fuente no respondió tras los reintentos y no hay deriva detectada | 3 |
+
+  `INCONCLUSO` **no es un éxito**: el job falla y el mensaje lo dice. Un error interno o una entrada inválida terminan en 1
+  (falla cerrado). La revisión jurídica manda sobre lo inconcluso.
+- **Dónde queda la constancia:** resumen del job y anotaciones (`::error` / `::warning`), con los datos saneados; el
+  historial de ejecuciones de Actions es el registro. `DRIFT_OUT` (opcional, uso local) guarda un informe JSON. GitHub avisa
+  al responsable cuando una ejecución programada falla.
+- **Activación:** los workflows con `schedule` solo corren desde la rama por defecto. Hasta estar en `main` no hace nada.
+  Necesita la variable `BLOG_APPROVER_FINGERPRINT` (la misma de las aprobaciones).
+- **Pruebas:** `tests/sources-drift.test.mjs` (9), `tests/ci-drift.test.mjs` (8, con árbol de `main` con aprobación firmada
+  real y `fetch` sustituido) y `tests/ci-drift-workflow.test.mjs` (4, estático). Incluyen: salida 3 para lo inconcluso,
+  excepción firmada que no tapa nada, aprobación inválida, presupuesto, entradas inválidas y comprobación de que el árbol
+  no se modifica.
+- **Límites:** no se ha ejecutado contra la red real ni en GitHub. La decisión de qué hacer ante un hallazgo (retirar,
+  actualizar, volver a firmar) es del responsable; F2.4 integrará el recalculo de candados y la firma.
