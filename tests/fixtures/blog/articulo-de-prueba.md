@@ -10,7 +10,6 @@
   "approved_at": "2026-10-15",
   "approval": {
     "pr": 1,
-    "commit": "0000000000000000000000000000000000000000",
     "content_sha256": "b5e96e4c447d6cb0f67c3888b8e104f59b2850de3154c6431f92f8fb193b23ef"
   },
   "sources": [

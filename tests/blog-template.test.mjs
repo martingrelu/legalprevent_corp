@@ -19,7 +19,6 @@ import {
   renderArticle,
   renderIndex,
 } from "../seo-engine/blog-render.mjs";
-import { verifyApprovalRecord } from "../seo-engine/verify-approval.mjs";
 
 const fixtures = new URL("./fixtures/blog/", import.meta.url).pathname;
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -129,16 +128,14 @@ test("un artículo aprobado necesita el bloque approval bien formado", () => {
   const sin = article();
   delete sin.meta.approval;
   assert.throws(() => parse(sin), /approval\.pr/);
-  for (const approval of [
-    { pr: 0, commit: "a".repeat(40) },
-    { pr: 1.5, commit: "a".repeat(40) },
-    { pr: 1, commit: "abc" },
-    { pr: 1, commit: "A".repeat(40) },
-  ]) {
+  for (const pr of [0, -1, 1.5, "28", null]) {
     const base = article();
-    base.meta.approval = { ...approval, content_sha256: contentHash(base.meta, base.body) };
-    assert.throws(() => parse(base), /approval\.(pr|commit)/);
+    base.meta.approval = { pr, content_sha256: contentHash(base.meta, base.body) };
+    assert.throws(() => parse(base), /approval\.pr/, String(pr));
   }
+  const conCommit = article();
+  conCommit.meta.approval = { ...conCommit.meta.approval, commit: "a".repeat(40) };
+  assert.throws(() => parse(conCommit), /approval\.commit ya no se usa/);
   const corto = article();
   corto.meta.approval.content_sha256 = "abc";
   assert.throws(() => parse(corto), /content_sha256/);
@@ -164,35 +161,6 @@ test("un artículo sin aprobar no puede llevar approval ni approved_at", () => {
   assert.doesNotThrow(() => parse(borrador));
   assert.throws(() => parse({ ...borrador, meta: { ...borrador.meta, approved_at: "2026-10-15" } }), /sin aprobar/);
   assert.throws(() => parse({ ...borrador, meta: { ...borrador.meta, approval: fixture.meta.approval } }), /sin aprobar/);
-});
-
-const review = (state, commit, login = "martingrelu") => ({ state, commit_id: commit, user: { login } });
-const COMMIT = "a".repeat(40);
-const sealed = () => {
-  const art = article();
-  art.meta.approval.commit = COMMIT;
-  art.meta.approval.content_sha256 = contentHash(art.meta, art.body);
-  return art;
-};
-
-test("verifyApprovalRecord acepta la revisión APPROVED del responsable sobre el commit correcto", () => {
-  const art = sealed();
-  assert.equal(verifyApprovalRecord(art, [review("COMMENTED", COMMIT), review("APPROVED", COMMIT)], "martingrelu", art.meta.approval.content_sha256).ok, true);
-  assert.equal(verifyApprovalRecord(art, [review("APPROVED", COMMIT, "MartinGrelu")], "martingrelu", art.meta.approval.content_sha256).ok, true);
-});
-
-test("verifyApprovalRecord rechaza aprobaciones ajenas, anuladas, de otro commit o con contenido distinto", () => {
-  const art = sealed();
-  const hash = art.meta.approval.content_sha256;
-  const fails = (reviews, h = hash) => verifyApprovalRecord(art, reviews, "martingrelu", h);
-  assert.match(fails([]).reason, /no ha revisado/);
-  assert.match(fails([review("APPROVED", COMMIT, "otra-persona")]).reason, /no ha revisado/);
-  assert.match(fails([review("COMMENTED", COMMIT)]).reason, /no ha revisado/);
-  assert.match(fails([review("APPROVED", COMMIT), review("CHANGES_REQUESTED", COMMIT)]).reason, /CHANGES_REQUESTED/);
-  assert.match(fails([review("APPROVED", COMMIT), review("DISMISSED", COMMIT)]).reason, /DISMISSED/);
-  assert.match(fails([review("APPROVED", "b".repeat(40))]).reason, /otro commit/);
-  assert.match(fails([review("APPROVED", COMMIT)], "0".repeat(64)).reason, /no coincide/);
-  assert.equal(verifyApprovalRecord(article({}, "x", { approved: false }), [], "martingrelu", hash).ok, false);
 });
 
 test("la configuración del responsable coincide con la firma de revisión", () => {
@@ -270,9 +238,15 @@ test("parseRaw/parseSource rechazan fuentes sin bloque JSON", () => {
 // ---- 5. El artículo ficticio de pruebas nunca se publica -------------------------------
 test("el fixture está marcado y no genera salida salvo que un test lo pida expresamente", () => {
   assert.equal(fixture.meta.fixture, true);
-  assert.deepEqual([...renderAll([fixture]).keys()], ["blog/index.html"]);
-  assert.doesNotMatch(renderAll([fixture]).get("blog/index.html"), /Artículo de prueba/);
+  assert.deepEqual([...renderAll([fixture]).keys()], []);
+  assert.deepEqual([...renderAll([fixture, article()]).keys()].sort(), ["blog/index.html", "blog/tema-real/index.html"]);
+  assert.doesNotMatch(renderAll([fixture, article()]).get("blog/index.html"), /articulo-de-prueba/);
   assert.ok(renderAll([fixture], { includeFixtures: true }).has("blog/articulo-de-prueba/index.html"));
+});
+
+test("sin artículos aprobados no se genera ni el índice", () => {
+  assert.equal(renderAll([]).size, 0);
+  assert.equal(renderAll([article({}, "x", { approved: false })]).size, 0);
 });
 
 test("la CLI solo lee content/blog: el fixture no está ahí ni se publica", () => {

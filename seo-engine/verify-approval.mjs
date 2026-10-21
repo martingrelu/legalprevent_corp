@@ -1,20 +1,19 @@
 // Verifica que cada artículo aprobado tiene una aprobación REAL de la PR, no solo un campo de texto.
+// Solo lectura: no escribe en el repositorio ni en GitHub.
 //
-// Mecanismo (trazabilidad):
-//   1. El borrador se revisa en una PR. El responsable jurídico la aprueba con una revisión de
-//      GitHub ("Approve") sobre el commit C, que contiene el artículo con review_status "in_review".
-//   2. Un commit posterior añade al artículo review_status "approved", approved_at y el bloque
-//      approval { pr, commit: C, content_sha256 }. Esos campos NO forman parte del hash de contenido.
-//   3. Este verificador comprueba, contra la API de GitHub y el historial de git, que:
-//        - existe una revisión APPROVED del responsable (seo-engine/approvers.json) en la PR indicada;
-//        - es su última revisión (una posterior de "cambios solicitados" o "descartada" la anula);
-//        - se hizo sobre el commit approval.commit;
-//        - el contenido del artículo en ese commit tiene el mismo hash que el actual,
-//          es decir, nada cambió después de la aprobación.
+// Modelo (aprobación ligada al SHA de la cabeza de la PR):
+//   - El autor deja el artículo con review_status "approved" y approval { pr, content_sha256 }.
+//   - La aprobación es la revisión "Approve" del responsable (seo-engine/approvers.json) en la PR
+//     approval.pr. Es válida solo si:
+//       1. su ÚLTIMA revisión decisiva (APPROVED / CHANGES_REQUESTED / DISMISSED) es APPROVED;
+//       2. el contenido del artículo en el commit que aprobó (review.commit_id) tiene el hash
+//          approval.content_sha256, es decir, es el mismo que hay ahora;
+//       3. si se verifica dentro de esa misma PR, review.commit_id es el SHA actual de su cabeza:
+//          cualquier push posterior (también de código) exige una aprobación nueva.
+//   - Cualquier error, falta de dato o respuesta inesperada se trata como fallo (fail closed).
 //
-// Uso (solo lectura; necesita GITHUB_TOKEN con permiso de lectura de PR):
-//   GITHUB_REPOSITORY=martingrelu/legalprevent_corp node seo-engine/verify-approval.mjs
-import { execFileSync } from "node:child_process";
+// Uso:  GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=… [PR_NUMBER=28 HEAD_SHA=<sha>] \
+//         node seo-engine/verify-approval.mjs
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,61 +21,95 @@ import { contentHash, loadArticles, parseRaw } from "./blog-render.mjs";
 
 const DECISIVE = ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"];
 
-// Función pura: recibe las revisiones de la PR y el hash del contenido en el commit aprobado.
-export function verifyApprovalRecord({ meta }, reviews, reviewerLogin, hashAtApprovedCommit) {
-  const approval = meta.approval;
-  if (meta.review_status !== "approved" || !approval) return { ok: false, reason: "el artículo no está aprobado" };
-  const decisive = reviews.filter(
-    (review) => review.user?.login?.toLowerCase() === reviewerLogin.toLowerCase() && DECISIVE.includes(review.state)
-  );
-  const latest = decisive.at(-1);
-  if (!latest) return { ok: false, reason: `${reviewerLogin} no ha revisado la PR #${approval.pr}` };
-  if (latest.state !== "APPROVED") return { ok: false, reason: `la última revisión de ${reviewerLogin} es ${latest.state}` };
-  if (latest.commit_id !== approval.commit) {
-    return { ok: false, reason: "la aprobación de la PR es de otro commit distinto de approval.commit" };
-  }
-  if (hashAtApprovedCommit !== approval.content_sha256) {
-    return { ok: false, reason: "el contenido en approval.commit no coincide con approval.content_sha256" };
-  }
-  return { ok: true, reason: `aprobado por ${reviewerLogin} en la PR #${approval.pr}` };
+export function latestDecisiveReview(reviews, reviewerLogin) {
+  const wanted = String(reviewerLogin).toLowerCase();
+  return reviews
+    .filter((review) => review?.user?.login?.toLowerCase() === wanted && DECISIVE.includes(review.state))
+    .at(-1);
 }
 
-async function fetchReviews(repo, pr, token) {
-  const reviews = [];
-  for (let page = 1; ; page++) {
-    const response = await fetch(`https://api.github.com/repos/${repo}/pulls/${pr}/reviews?per_page=100&page=${page}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
-    });
-    if (!response.ok) throw new Error(`GitHub API ${response.status} al leer las revisiones de la PR #${pr}`);
-    const batch = await response.json();
-    reviews.push(...batch);
-    if (batch.length < 100) return reviews;
+// `client` = { getReviews(pr) → [review], getFile(path, ref) → string }. Inyectable para probar.
+export async function verifyArticle(article, { client, reviewerLogin, currentPr, headSha }) {
+  const { meta } = article;
+  const fail = (reason) => ({ ok: false, reason });
+  const approval = meta.approval;
+  if (meta.fixture === true) return fail("un artículo de pruebas (fixture) no puede estar en content/blog");
+  if (meta.review_status !== "approved" || !approval) return fail("el artículo no está aprobado");
+  try {
+    const reviews = await client.getReviews(approval.pr);
+    const latest = latestDecisiveReview(reviews, reviewerLogin);
+    if (!latest) return fail(`${reviewerLogin} no ha revisado la PR #${approval.pr}`);
+    if (latest.state !== "APPROVED") return fail(`la última revisión de ${reviewerLogin} es ${latest.state}`);
+    if (!/^[0-9a-f]{40}$/.test(latest.commit_id ?? "")) return fail("la revisión no indica un commit válido");
+    const { meta: reviewedMeta, body } = parseRaw(
+      await client.getFile(`content/blog/${meta.slug}.md`, latest.commit_id),
+      `${meta.slug}@${latest.commit_id.slice(0, 7)}`
+    );
+    if (contentHash(reviewedMeta, body) !== approval.content_sha256) {
+      return fail("el contenido que aprobó el responsable no coincide con approval.content_sha256");
+    }
+    if (currentPr === approval.pr) {
+      if (!headSha) return fail("falta el SHA de la cabeza de la PR");
+      if (latest.commit_id !== headSha) return fail("la cabeza de la PR cambió después de la aprobación: requiere una nueva");
+    }
+    return { ok: true, reason: `aprobado por ${reviewerLogin} en la PR #${approval.pr}` };
+  } catch (error) {
+    return fail(`no se pudo verificar: ${error.message}`);
   }
+}
+
+export function githubClient(repo, token, fetchImpl = fetch) {
+  const headers = (accept) => ({
+    Authorization: `Bearer ${token}`,
+    Accept: accept,
+    "X-GitHub-Api-Version": "2022-11-28",
+  });
+  return {
+    async getReviews(pr) {
+      const reviews = [];
+      for (let page = 1; ; page++) {
+        const response = await fetchImpl(`https://api.github.com/repos/${repo}/pulls/${pr}/reviews?per_page=100&page=${page}`, {
+          headers: headers("application/vnd.github+json"),
+        });
+        if (!response.ok) throw new Error(`GitHub API ${response.status} al leer las revisiones de la PR #${pr}`);
+        const batch = await response.json();
+        if (!Array.isArray(batch)) throw new Error("respuesta inesperada de GitHub");
+        reviews.push(...batch);
+        if (batch.length < 100) return reviews;
+      }
+    },
+    async getFile(path, ref) {
+      const response = await fetchImpl(`https://api.github.com/repos/${repo}/contents/${path}?ref=${ref}`, {
+        headers: headers("application/vnd.github.raw+json"),
+      });
+      if (!response.ok) throw new Error(`GitHub API ${response.status} al leer ${path}@${ref.slice(0, 7)}`);
+      return response.text();
+    },
+  };
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const { reviewer_github: reviewer } = JSON.parse(readFileSync(resolve(root, "seo-engine/approvers.json"), "utf8"));
-  const repo = process.env.GITHUB_REPOSITORY;
-  const token = process.env.GITHUB_TOKEN;
+  const { reviewer_github: reviewerLogin } = JSON.parse(readFileSync(resolve(root, "seo-engine/approvers.json"), "utf8"));
+  const { GITHUB_REPOSITORY: repo, GITHUB_TOKEN: token, PR_NUMBER, HEAD_SHA: headSha } = process.env;
   if (!repo || !token) {
     console.error("Faltan GITHUB_REPOSITORY o GITHUB_TOKEN");
     process.exit(2);
   }
+  const currentPr = PR_NUMBER ? Number(PR_NUMBER) : undefined;
+  if (PR_NUMBER && (!Number.isInteger(currentPr) || !/^[0-9a-f]{40}$/.test(headSha ?? ""))) {
+    console.error("PR_NUMBER requiere HEAD_SHA (40 caracteres hexadecimales)");
+    process.exit(2);
+  }
+  const client = githubClient(repo, token);
+  const approved = loadArticles(resolve(root, "content/blog")).filter(({ meta }) => meta.review_status === "approved");
   let failed = 0;
-  for (const article of loadArticles(resolve(root, "content/blog")).filter(({ meta }) => meta.review_status === "approved")) {
-    const { slug, approval } = article.meta;
-    let result;
-    try {
-      const old = execFileSync("git", ["show", `${approval.commit}:content/blog/${slug}.md`], { cwd: root, encoding: "utf8" });
-      const { meta, body } = parseRaw(old, `${slug}@${approval.commit.slice(0, 7)}`);
-      result = verifyApprovalRecord(article, await fetchReviews(repo, approval.pr, token), reviewer, contentHash(meta, body));
-    } catch (error) {
-      result = { ok: false, reason: error.message };
-    }
-    console.log(`${result.ok ? "OK " : "ERROR"} ${slug}: ${result.reason}`);
+  for (const article of approved) {
+    const result = await verifyArticle(article, { client, reviewerLogin, currentPr, headSha });
+    console.log(`${result.ok ? "OK   " : "ERROR"} ${article.meta.slug}: ${result.reason}`);
     if (!result.ok) failed++;
   }
+  if (!approved.length) console.log("Sin artículos aprobados: nada que verificar.");
   process.exit(failed ? 1 : 0);
 }

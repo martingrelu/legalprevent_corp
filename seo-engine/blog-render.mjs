@@ -3,7 +3,8 @@
 //
 // Solo los artículos APROBADOS generan salida pública. Un borrador (draft / in_review)
 // no produce ningún HTML en blog/. La aprobación no es un texto libre: la registra un
-// bloque `approval` que seo-engine/verify-approval.mjs contrasta con la revisión de la PR.
+// bloque `approval {pr, content_sha256}` que seo-engine/verify-approval.mjs contrasta con la
+// revisión APPROVED del responsable sobre el SHA de la cabeza de la PR (ver docs/blog-approval.md).
 //
 // Formato de la fuente: un bloque JSON entre dos líneas `---` y, debajo, el cuerpo
 // en un subconjunto de Markdown (##, ###, párrafos, listas con "- ", **negrita**,
@@ -126,7 +127,7 @@ export function validate(meta, body, { file = "(fuente)", today = todayUtc() } =
     if (meta.approved_at < meta.date_modified) fail("approved_at anterior a date_modified");
     const approval = meta.approval;
     if (!approval || !Number.isInteger(approval.pr) || approval.pr < 1) fail("approval.pr debe ser el número de la PR");
-    if (!/^[0-9a-f]{40}$/.test(approval.commit ?? "")) fail("approval.commit debe ser un SHA de 40 caracteres");
+    if ("commit" in approval) fail("approval.commit ya no se usa: la aprobación se liga al SHA de la cabeza de la PR");
     if (!/^[0-9a-f]{64}$/.test(approval.content_sha256 ?? "")) fail("approval.content_sha256 debe ser un SHA-256");
     if (approval.content_sha256 !== contentHash(meta, body)) {
       fail("el contenido cambió después de la aprobación: requiere una nueva revisión");
@@ -395,12 +396,14 @@ ${items}
   });
 }
 
-// Salida pública: el índice y SOLO los artículos aprobados. Borradores y fixtures no generan nada.
+// Salida pública: el índice y SOLO los artículos aprobados. Borradores y fixtures no generan nada;
+// sin ningún artículo aprobado no se genera ni el índice (no se publica un blog vacío).
 export function renderAll(articles, { includeFixtures = false } = {}) {
-  const files = new Map([["blog/index.html", renderIndex(articles, { includeFixtures })]]);
+  const files = new Map();
   for (const article of articles) {
     if (isPublishable(article, includeFixtures)) files.set(`blog/${article.meta.slug}/index.html`, renderArticle(article));
   }
+  if (files.size) files.set("blog/index.html", renderIndex(articles, { includeFixtures }));
   return files;
 }
 
