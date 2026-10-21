@@ -1,7 +1,12 @@
-// Verifica que cada artículo aprobado tiene una aprobación REAL de la PR, no solo un campo de texto.
-// Solo lectura: no escribe en el repositorio ni en GitHub.
+// Verifica que cada artículo aprobado tiene una aprobación REAL, no solo un campo de texto.
+// Solo lectura: no escribe en el repositorio ni en GitHub. El modo se elige en seo-engine/approvers.json:
 //
-// Modelo (aprobación ligada al SHA de la cabeza de la PR):
+//   "signature" (por defecto, el que usa CI): aprobación individual con firma SSH desprendida sobre el
+//     SHA-256 del contenido (seo-engine/approval-signature.mjs). Offline: sin red ni tokens. Necesita la
+//     variable BLOG_APPROVER_FINGERPRINT (huella fijada fuera del repositorio).
+//   "pr-review" (opcional, para un segundo revisor): lo descrito a continuación.
+//
+// Modelo "pr-review" (aprobación ligada al SHA de la cabeza de la PR):
 //   - El autor deja el artículo con review_status "approved" y approval { pr, content_sha256 }.
 //   - La aprobación es la revisión "Approve" del responsable (seo-engine/approvers.json) en la PR
 //     approval.pr. Es válida solo si:
@@ -17,6 +22,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifySignedApprovals } from "./approval-signature.mjs";
 import { contentHash, loadArticles, parseRaw } from "./blog-render.mjs";
 
 const DECISIVE = ["APPROVED", "CHANGES_REQUESTED", "DISMISSED"];
@@ -89,9 +95,33 @@ export function githubClient(repo, token, fetchImpl = fetch) {
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+const approvers = isMain
+  ? JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "approvers.json"), "utf8"))
+  : undefined;
+
+// Modo "signature" (por defecto): registros firmados con la clave del responsable; offline y sin token.
+if (isMain && (approvers.mode ?? "signature") === "signature") {
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  let results;
+  try {
+    results = verifySignedApprovals({
+      root,
+      identity: approvers.reviewer_github,
+      pinnedFingerprint: process.env.BLOG_APPROVER_FINGERPRINT,
+    });
+  } catch (error) {
+    console.error(`ERROR no se pudo verificar: ${error.message}`);
+    process.exit(1);
+  }
+  for (const result of results) console.log(`${result.ok ? "OK   " : "ERROR"} ${result.slug}: ${result.reason}`);
+  if (!results.length) console.log("Sin artículos aprobados: nada que verificar.");
+  process.exit(results.some((result) => !result.ok) ? 1 : 0);
+}
+
+// Modo opcional "pr-review": revisión APPROVED en la PR (necesita GITHUB_TOKEN con lectura de PR).
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const { reviewer_github: reviewerLogin } = JSON.parse(readFileSync(resolve(root, "seo-engine/approvers.json"), "utf8"));
+  const { reviewer_github: reviewerLogin } = approvers;
   const { GITHUB_REPOSITORY: repo, GITHUB_TOKEN: token, PR_NUMBER, HEAD_SHA: headSha } = process.env;
   if (!repo || !token) {
     console.error("Faltan GITHUB_REPOSITORY o GITHUB_TOKEN");

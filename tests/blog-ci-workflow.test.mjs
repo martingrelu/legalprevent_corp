@@ -1,5 +1,5 @@
-// Comprobación estática del workflow blog-ci.yml: permisos mínimos, solo lectura, sin secretos
-// propios, acciones fijadas por SHA y sin entradas no confiables en los pasos `run`.
+// Comprobación estática del workflow blog-ci.yml: permisos mínimos, solo lectura, sin secretos ni
+// token de la API, acciones fijadas por SHA y sin entradas no confiables en los pasos `run`.
 // Además comprueba que el despliegue de producción (pages.yml) y la allowlist no cambian.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -9,35 +9,30 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 const ci = read(".github/workflows/blog-ci.yml");
 const jobBlock = (name) => ci.split(/^  (?=[a-z]+:\n)/m).find((block) => block.startsWith(`${name}:`));
 
-test("solo se dispara con pull_request, pull_request_review y push a main (nunca pull_request_target)", () => {
+test("solo se dispara con pull_request y push a main (nunca pull_request_target ni eventos de revisión)", () => {
   assert.match(ci, /^on:\n  pull_request:\n/m);
-  assert.match(ci, /^  pull_request_review:\n/m);
   assert.match(ci, /^  push:\n    branches: \[main\]/m);
-  assert.doesNotMatch(ci, /pull_request_target|workflow_run|workflow_dispatch|schedule:/);
+  assert.doesNotMatch(ci, /pull_request_target|pull_request_review|workflow_run|workflow_dispatch|schedule:|issue_comment/);
 });
 
-test("permisos: vacíos por defecto y solo lectura en cada job", () => {
+test("permisos: vacíos por defecto y solo contents: read en cada job (sin API de GitHub)", () => {
   assert.match(ci, /^permissions: \{\}/m);
   const allPermissions = [...ci.matchAll(/^\s+([a-z-]+): (read|write|none)\s*(?:#.*)?$/gm)];
-  assert.ok(allPermissions.length >= 3);
-  for (const [, scope, level] of allPermissions) assert.equal(level, "read", `${scope}: ${level}`);
-  assert.doesNotMatch(ci, /: write\b|id-token|contents: write|pull-requests: write|statuses: write|checks: write/);
-  assert.match(jobBlock("approval"), /pull-requests: read/);
-  assert.doesNotMatch(jobBlock("tests"), /pull-requests/);
+  assert.equal(allPermissions.length, 2);
+  for (const [, scope, level] of allPermissions) {
+    assert.equal(scope, "contents");
+    assert.equal(level, "read");
+  }
+  assert.doesNotMatch(ci, /: write\b|id-token|pull-requests|statuses|checks|actions:|deployments/);
 });
 
-test("no usa más secreto que el token de solo lectura del propio workflow", () => {
-  assert.doesNotMatch(ci, /secrets\./);
+test("no usa secretos ni token: solo la variable pública con la huella de la clave", () => {
+  assert.doesNotMatch(ci, /secrets\.|github\.token|GITHUB_TOKEN|GH_TOKEN/);
   const references = [...ci.matchAll(/\$\{\{\s*([^}]+?)\s*\}\}/g)].map((m) => m[1]);
-  for (const reference of references) {
-    assert.match(
-      reference,
-      /^(github\.(token|repository|ref|event\.pull_request\.(number|head\.sha))( \|\| github\.ref)?|github\.event\.pull_request\.number \|\| github\.ref)$/,
-      `expresión no esperada: ${reference}`
-    );
-  }
-  // El token solo llega al paso de verificación, no al job de tests.
-  assert.doesNotMatch(jobBlock("tests"), /github\.token|GITHUB_TOKEN/);
+  assert.deepEqual(references.sort(), ["github.event.pull_request.number || github.ref", "vars.BLOG_APPROVER_FINGERPRINT"]);
+  // La variable solo llega al paso de verificación, no al job de tests.
+  assert.doesNotMatch(jobBlock("tests"), /BLOG_APPROVER_FINGERPRINT|vars\./);
+  assert.match(jobBlock("approval"), /BLOG_APPROVER_FINGERPRINT: \$\{\{ vars\.BLOG_APPROVER_FINGERPRINT \}\}/);
 });
 
 test("las acciones están fijadas por SHA, sin credenciales persistentes", () => {
@@ -74,5 +69,5 @@ test("producción no cambia: pages.yml sigue publicando solo la allowlist y esta
   assert.match(pages, /pages-allowlist\.txt/);
   assert.doesNotMatch(pages, /blog|seo-engine|content\//);
   const allowlist = read(".github/pages-allowlist.txt");
-  assert.doesNotMatch(allowlist, /blog|seo-engine|content\/|docs\/blog-approval|workflows\/blog-ci/);
+  assert.doesNotMatch(allowlist, /blog|seo-engine|content\/|docs\/blog-approval|workflows\/blog-ci|approvals|allowed_signers/);
 });

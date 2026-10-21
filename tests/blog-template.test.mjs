@@ -124,10 +124,13 @@ test("la aprobación ya no es un texto libre: approved_by se rechaza", () => {
   assert.throws(() => parse(article({ approved_by: REVIEWER.name })), /approved_by ya no se admite/);
 });
 
-test("un artículo aprobado necesita el bloque approval bien formado", () => {
+test("el bloque approval es opcional (modo firma) pero, si existe, debe estar bien formado", () => {
   const sin = article();
   delete sin.meta.approval;
-  assert.throws(() => parse(sin), /approval\.pr/);
+  assert.doesNotThrow(() => parse(sin), "la aprobación real son los registros firmados, no este bloque");
+  const sinFecha = article();
+  delete sinFecha.meta.approved_at;
+  assert.throws(() => parse(sinFecha), /approved_at/);
   for (const pr of [0, -1, 1.5, "28", null]) {
     const base = article();
     base.meta.approval = { pr, content_sha256: contentHash(base.meta, base.body) };

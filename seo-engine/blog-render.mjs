@@ -2,9 +2,10 @@
 // Fuente: content/blog/<slug>.md  →  Salida: blog/<slug>/index.html y blog/index.html
 //
 // Solo los artículos APROBADOS generan salida pública. Un borrador (draft / in_review)
-// no produce ningún HTML en blog/. La aprobación no es un texto libre: la registra un
-// bloque `approval {pr, content_sha256}` que seo-engine/verify-approval.mjs contrasta con la
-// revisión APPROVED del responsable sobre el SHA de la cabeza de la PR (ver docs/blog-approval.md).
+// no produce ningún HTML en blog/. review_status "approved" solo declara la intención: la aprobación
+// real es un registro firmado con la clave del responsable para el SHA-256 del contenido actual
+// (seo-engine/approval-signature.mjs, verificado en CI). Modo opcional "pr-review": ver
+// seo-engine/verify-approval.mjs. Detalles en docs/blog-approval.md.
 //
 // Formato de la fuente: un bloque JSON entre dos líneas `---` y, debajo, el cuerpo
 // en un subconjunto de Markdown (##, ###, párrafos, listas con "- ", **negrita**,
@@ -125,12 +126,16 @@ export function validate(meta, body, { file = "(fuente)", today = todayUtc() } =
     if (!isCalendarDate(meta.approved_at)) fail("un artículo aprobado necesita approved_at (fecha real AAAA-MM-DD)");
     if (meta.approved_at > today) fail("approved_at no puede ser futura");
     if (meta.approved_at < meta.date_modified) fail("approved_at anterior a date_modified");
+    // Modo "signature": la aprobación real son los registros firmados (approval-signature.mjs); este
+    // campo solo declara la intención. Modo "pr-review" (opcional): bloque approval {pr, content_sha256}.
     const approval = meta.approval;
-    if (!approval || !Number.isInteger(approval.pr) || approval.pr < 1) fail("approval.pr debe ser el número de la PR");
-    if ("commit" in approval) fail("approval.commit ya no se usa: la aprobación se liga al SHA de la cabeza de la PR");
-    if (!/^[0-9a-f]{64}$/.test(approval.content_sha256 ?? "")) fail("approval.content_sha256 debe ser un SHA-256");
-    if (approval.content_sha256 !== contentHash(meta, body)) {
-      fail("el contenido cambió después de la aprobación: requiere una nueva revisión");
+    if (approval !== undefined) {
+      if (!Number.isInteger(approval.pr) || approval.pr < 1) fail("approval.pr debe ser el número de la PR");
+      if ("commit" in approval) fail("approval.commit ya no se usa: la aprobación se liga al SHA de la cabeza de la PR");
+      if (!/^[0-9a-f]{64}$/.test(approval.content_sha256 ?? "")) fail("approval.content_sha256 debe ser un SHA-256");
+      if (approval.content_sha256 !== contentHash(meta, body)) {
+        fail("el contenido cambió después de la aprobación: requiere una nueva revisión");
+      }
     }
   } else if ("approval" in meta || "approved_at" in meta) {
     fail("un artículo sin aprobar no puede llevar approval ni approved_at");

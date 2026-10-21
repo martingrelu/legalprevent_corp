@@ -1,68 +1,114 @@
 # Aprobación jurídica del blog: procedimiento y requisitos
 
-Estado: **documentado, no activado**. Este documento no se publica (no está en `.github/pages-allowlist.txt`).
-Nada de lo que describe en las secciones "CODEOWNERS" y "Protección de `main`" está configurado todavía.
+Estado: **implementado en la rama, sin activar en el repositorio**. Este documento no se publica (no está en
+`.github/pages-allowlist.txt`). La clave, `allowed_signers` y la variable de Actions las configura el responsable;
+mientras no existan, ningún artículo puede pasar la verificación (falla cerrado). CODEOWNERS y la protección de `main`
+siguen sin activarse.
 
 ## 1. Principio
 
-Ningún artículo jurídico se publica sin la aprobación expresa del responsable de revisión
-(Luis Martín Grecco, abogado; usuario de GitHub en `seo-engine/approvers.json`). La aprobación
-es la revisión **Approve** de GitHub sobre la PR, no un campo de texto editable.
+Ningún artículo jurídico se publica sin la autorización expresa del responsable (Luis Martín Grecco, abogado;
+usuario de GitHub `martingrelu`, en `seo-engine/approvers.json`). Cambiar `review_status` a `approved` **no aprueba
+nada**: solo declara la intención. La aprobación es un registro **firmado con la clave privada del responsable** sobre el
+SHA-256 del contenido revisado.
 
-## 2. Cómo funciona
+Por qué una firma y no una revisión de GitHub: una aprobación que dependa solo de la sesión de GitHub del responsable
+(una revisión, un comentario, lanzar un workflow) puede producirla cualquiera que use esa sesión, incluido un agente o un
+motor automático. La firma exige además algo que solo tiene el responsable: la clave privada y su contraseña.
 
-1. El borrador vive en `content/blog/<slug>.md` con `review_status` `draft` o `in_review`. Mientras
-   no esté aprobado no genera ningún HTML en `blog/`.
-2. Para proponer la publicación, el autor deja en el artículo:
-   - `review_status: "approved"` y `approved_at` (fecha real, no futura, no anterior a `date_modified`);
-   - `approval: { "pr": <n.º de la PR>, "content_sha256": "<hash>" }`. El hash se obtiene con
-     `node seo-engine/blog-render.mjs --hash content/blog/<slug>.md`.
-3. El responsable revisa y pulsa **Approve** en esa PR. La aprobación queda ligada por GitHub al
-   SHA exacto de la cabeza de la PR.
-4. `blog-ci / approval` ejecuta `seo-engine/verify-approval.mjs` y solo pasa si:
-   - la **última** revisión decisiva del responsable (`APPROVED`, `CHANGES_REQUESTED` o `DISMISSED`) es `APPROVED`;
-   - el contenido del artículo en el commit que aprobó tiene el hash `approval.content_sha256`;
-   - en la propia PR, ese commit es la cabeza actual: cualquier push posterior (también de código) exige una aprobación nueva.
-5. Tras el merge, `blog-render.mjs` genera `blog/<slug>/index.html`, se añade a la allowlist y
-   `pages.yml` lo publica. Eso se hace en una PR aparte y también necesita aprobación.
-6. En cada ejecución (y al hacer push a `main`) se reverifica toda aprobación. Si una aprobación
-   se revoca después, el check falla y avisa; no despublica solo.
+**Qué es y qué no es.** Es una *autorización individual firmada*: deja constancia atribuible, vinculada al contenido y
+verificable. **No** es una segunda revisión independiente. Aceptar ese nivel de control es una decisión del responsable.
 
-Cualquier error, dato ausente o respuesta inesperada de GitHub cuenta como fallo (fail closed).
+## 2. Configuración única (la hace el responsable, en su máquina y en GitHub)
 
-## 3. Qué impide superar la verificación
+1. Crear una clave SSH **dedicada** y con contraseña (no reutilizar la de acceso a GitHub ni cargarla en un agente SSH):
+   ```
+   ssh-keygen -t ed25519 -f ~/.ssh/legalprevent_approval -C "legalprevent-blog-approval"
+   ```
+   Con una llave FIDO2 (`-t ed25519-sk`) se exigiría además tocarla al firmar; el soporte está previsto pero **no está probado**.
+2. Obtener su huella: `ssh-keygen -lf ~/.ssh/legalprevent_approval.pub` → `SHA256:…`.
+3. Crear `seo-engine/allowed_signers` con **una sola línea** y subirlo por PR:
+   ```
+   martingrelu namespaces="legalprevent-blog-approval" <contenido de legalprevent_approval.pub>
+   ```
+4. Definir la variable de Actions **`BLOG_APPROVER_FINGERPRINT`** con esa huella: GitHub → Settings → Secrets and
+   variables → Actions → pestaña *Variables* → *New repository variable*. Es una variable (no un secreto): la huella es pública.
+   Es el anclaje de confianza: **quien solo pueda hacer push no puede cambiarla** y, por tanto, tampoco sustituir la clave
+   por otra en `allowed_signers`.
+
+## 3. Procedimiento por artículo
+
+1. El borrador vive en `content/blog/<slug>.md` con `review_status` `draft` o `in_review`: no genera HTML ni necesita firma.
+2. Tras revisarlo, el responsable deja `review_status: "approved"` y `approved_at` = **la fecha de hoy** (UTC).
+3. En **su terminal**: `node seo-engine/approve.mjs <slug>`. Muestra título, slug y SHA-256, pide escribir los 8 primeros
+   caracteres del hash y la contraseña de la clave. Firma, comprueba la firma contra `allowed_signers` y escribe
+   `content/blog/approvals/<slug>/<fecha>-approve-<hash8>.json`.
+4. Se commitea ese registro junto con el artículo. Una PR sin firma válida no supera `blog-ci / approval`.
+5. Tras el merge, `blog-render.mjs` genera `blog/<slug>/index.html`, se añade a la allowlist y `pages.yml` lo publica
+   (en una PR aparte, también con CI).
+
+`approve.mjs` se niega a ejecutarse sin terminal interactiva o en CI. Es una barrera de proceso, **no un control criptográfico**:
+el control real es que la clave tenga contraseña y que el agente no pueda usarla.
+
+## 4. Qué cuenta como aprobado
+
+Un artículo está aprobado solo si, para el hash SHA-256 de su contenido **actual**, el registro firmado más reciente es una
+*aprobación* válida: firma correcta con la clave fijada, espacio de nombres `legalprevent-blog-approval`, identidad del
+responsable, timestamp no futuro, nombre de fichero coherente con su contenido y `approved_at` igual a la fecha de la firma.
 
 | Situación | Resultado |
 |---|---|
-| Sin revisión, o solo comentarios | falla |
-| Aprobación de otra persona | falla |
-| Aprobación revocada (cambios solicitados o descartada después) | falla |
-| Contenido modificado tras la aprobación (hash distinto) | falla |
-| Push a la PR posterior a la aprobación | falla hasta una nueva aprobación |
-| Artículo de pruebas (`"fixture": true`) en `content/blog` | falla |
-| Error de red o de API | falla |
+| `review_status: approved` sin registro firmado | falla |
+| Cambio del contenido (cuerpo, título, fechas, fuentes…) tras firmar | falla (el hash ya no coincide) |
+| Firma de otra clave o con otro espacio de nombres (p. ej. firma de commit) | falla |
+| Registro manipulado (campos, firma o nombre del fichero) | falla |
+| `allowed_signers` sustituido por otra clave | falla (la huella no coincide con la fijada) |
+| Variable `BLOG_APPROVER_FINGERPRINT` ausente o con formato inválido | falla |
+| `allowed_signers` con más de una clave, o de otra identidad | falla |
+| Revocación posterior (o con el mismo instante) | falla |
+| Timestamp futuro (más de 5 min de desfase) | falla |
+| Fixture en `content/blog` | falla |
+| Error al ejecutar `ssh-keygen` | falla |
 
-## 4. Autor y revisor jurídico son la misma persona
+El hash cubre todo salvo `review_status`, `approved_at` y `approval`: esos campos cambian al aprobar y no son contenido revisado.
 
-GitHub **no permite aprobar la propia PR**: el autor solo puede comentar. Si la PR la abre y revisa la
-misma cuenta, no existe ninguna revisión `APPROVED` y `blog-ci / approval` fallará siempre.
-Además, con "Require approval of the most recent reviewable push" activado, quien hizo el último push
-tampoco puede aprobar esa PR.
+## 5. Historial auditable
 
-Procedimientos válidos:
+- Cada aprobación y revocación es un fichero nuevo, firmado e inmutable: `content/blog/approvals/<slug>/<AAAAMMDD>T<HHMMSS>Z-<approve|revoke>-<hash8>.json`.
+  `approve.mjs` nunca sobrescribe; cualquier edición rompe la firma o el nombre.
+- El historial es la lista de ficheros más `git log`. Eliminar un registro es visible en git.
+- **Revocar:** `node seo-engine/approve.mjs <slug> --revoke [--sha256 <hash>]` firma una revocación para ese contenido. Una
+  aprobación posterior del mismo contenido lo restablece.
 
-1. **Recomendado.** Los borradores de IA los abre una cuenta de bot o GitHub App; el responsable los
-   aprueba. Si el responsable edita el texto, lo hace en una PR aparte o lo revisa una segunda persona.
-2. **Segundo revisor.** Una segunda cuenta de revisión (colaborador) aprueba; hay que añadirla a `approvers.json`
-   y a CODEOWNERS (el verificador actual solo acepta un usuario).
-3. **No válido.** Saltarse la protección como administrador. Rompe la trazabilidad en contenido jurídico.
+## 6. CI (`blog-ci.yml`)
 
-No se implementa una "auto-aprobación" por comentario: daría trazabilidad, pero no una segunda
-comprobación independiente. Si se quisiera, sería una decisión explícita y se documentaría como excepción.
+- Eventos: `pull_request` y `push` a `main`; nunca `pull_request_target`.
+- `contents: read` en cada job; sin escritura, sin `GITHUB_TOKEN` para la API ni secretos. La verificación es **offline**
+  (`ssh-keygen -Y verify`). Lo único que lee del entorno es la variable pública `BLOG_APPROVER_FINGERPRINT`.
+- Acciones fijadas por SHA, `persist-credentials: false`, sin texto de la PR en `run:`. No despliega ni escribe: el despliegue
+  sigue siendo solo `pages.yml` (allowlist).
+- En PR de forks las variables de Actions no están disponibles: la verificación fallaría cerrada si hubiese artículos aprobados.
 
-## 5. CODEOWNERS (requisito; no activado)
+## 7. Límites y riesgos
 
-Fichero `.github/CODEOWNERS`, que **no existe todavía**. Contenido previsto (sustituir el usuario por el real):
+- **Sin segundo revisor.** Si se compromete la cuenta o la clave, alguien puede aprobar en nombre del responsable.
+- **Pérdida o compromiso de la clave:** generar otra, actualizar `allowed_signers` (por PR) y la variable, y volver a firmar los
+  artículos vigentes. Las firmas antiguas dejan de validar al cambiar la clave fijada.
+- **Quien administre el repositorio puede cambiar la variable.** Es el anclaje; protege frente a quien solo tiene push o un token de CI.
+- **La fecha firmada la declara el firmante.** Es indicativa; el orden fiable lo da `git log`.
+- **Contenido ya aprobado:** volver a un texto firmado antes (mismo hash) lo vuelve a aprobar salvo que se haya revocado.
+- **Sin protección de rama:** mientras `main` no la tenga, el check no es obligatorio. Un administrador podría fusionar sin
+  que pase. CODEOWNERS y la protección de `main` quedan documentadas y sin activar (sección 9).
+- **El soporte de llaves FIDO2** y la verificación en el runner con OpenSSH 9.6 solo están probados con claves ed25519 normales en local.
+
+## 8. Rotación y primer uso
+
+Hasta que existan `allowed_signers` y la variable, el CI pasa si no hay artículos aprobados y falla si los hay. Esto es
+intencionado: la publicación no es posible sin la configuración del responsable.
+
+## 9. CODEOWNERS y protección de `main` (requisitos; no activados)
+
+`.github/CODEOWNERS` (no existe todavía):
 
 ```
 /content/blog/              @martingrelu
@@ -72,38 +118,22 @@ Fichero `.github/CODEOWNERS`, que **no existe todavía**. Contenido previsto (su
 /tests/                     @martingrelu
 ```
 
-CODEOWNERS no tiene efecto hasta activar "Require review from Code Owners" en la protección de `main`.
-
-## 6. Protección de `main` (requisitos; no activada)
-
 Branch protection (o ruleset) sobre `main`:
 
-- Requerir pull request antes de fusionar; sin pushes directos.
-- Requerir al menos 1 aprobación.
-- Requerir revisión de los Code Owners.
-- Descartar aprobaciones obsoletas cuando se suben nuevos commits.
-- Requerir aprobación del push más reciente revisable (el último en pushear no puede aprobar).
-- Requerir comprobaciones de estado: `tests` y `approval` (workflow "Blog CI (tests y aprobaciones)"), con la rama al día.
-- Requerir resolución de conversaciones.
-- Incluir a los administradores (sin bypass) y restringir quién puede hacer push.
-- Bloquear force-push y borrado de la rama.
+- PR obligatoria y sin pushes directos; bloquear force-push y borrado de la rama.
+- Comprobaciones de estado requeridas: `tests` y `approval` (workflow "Blog CI (tests y aprobaciones)"), con la rama al día.
+- Incluir a los administradores (sin bypass) y requerir resolución de conversaciones.
+- No exigir aprobaciones de revisión si el responsable es el único mantenedor (GitHub no permite aprobar la propia PR).
+  Con un segundo revisor, activar además la revisión de Code Owners.
+- Los checks obligatorios no deben depender de filtros de rutas; `blog-ci.yml` no los usa.
 
-Notas:
-- Los checks obligatorios no deben depender de filtros de rutas: si no se ejecutan, la PR queda pendiente.
-  `blog-ci.yml` no los usa a propósito.
-- **Por comprobar en una PR de prueba antes de activar:** que el check `approval` se actualice al enviar una
-  revisión (`pull_request_review`). Si no se refrescara en la PR, bastará con "Re-run jobs" tras aprobar,
-  porque el verificador lee las revisiones en el momento de ejecutarse.
+## 10. Modo opcional "pr-review" (para un segundo revisor)
 
-## 7. Seguridad del workflow `blog-ci.yml`
+`seo-engine/verify-approval.mjs` conserva el modo `"mode": "pr-review"` en `approvers.json`: aprobación por revisión de GitHub
+ligada al SHA de la cabeza de la PR y al hash del contenido (`approval {pr, content_sha256}`). Necesita un `GITHUB_TOKEN` con
+`pull-requests: read`, que `blog-ci.yml` **no** concede. No se usa mientras el responsable sea una sola persona. GitHub no
+permite aprobar la propia PR, por eso este modo no sirve para el flujo actual.
 
-- Eventos: `pull_request`, `pull_request_review` y `push` a `main`. Nunca `pull_request_target`.
-- Permisos vacíos por defecto; cada job solo `contents: read` (y `approval` además `pull-requests: read`). Sin escritura.
-- Sin secretos propios ni claves de API: solo el `GITHUB_TOKEN` de solo lectura, que llega únicamente al paso de verificación.
-- Acciones fijadas por SHA, `persist-credentials: false`, sin interpolar en `run:` texto controlable por el autor de la PR.
-- No despliega, no publica ni escribe en el repositorio: el despliegue sigue siendo solo `pages.yml` (allowlist).
-- Una PR de un fork recibe un token de solo lectura y ningún secreto.
-
-## 8. Fuera de alcance de esta fase
+## 11. Fuera de alcance de esta fase
 
 Registro de fuentes jurídicas, verificador de citas, generación con IA y la cuenta de bot que abre los borradores.
