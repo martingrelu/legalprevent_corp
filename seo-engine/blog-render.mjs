@@ -1,12 +1,18 @@
 // Plantilla del blog (Fase 1 del motor SEO). Sin dependencias.
 // Fuente: content/blog/<slug>.md  →  Salida: blog/<slug>/index.html y blog/index.html
 //
+// Solo los artículos APROBADOS generan salida pública. Un borrador (draft / in_review)
+// no produce ningún HTML en blog/. La aprobación no es un texto libre: la registra un
+// bloque `approval` que seo-engine/verify-approval.mjs contrasta con la revisión de la PR.
+//
 // Formato de la fuente: un bloque JSON entre dos líneas `---` y, debajo, el cuerpo
 // en un subconjunto de Markdown (##, ###, párrafos, listas con "- ", **negrita**,
 // *cursiva* y [texto](https://… o /ruta)). Todo el texto se escapa.
 //
 // Uso:  node seo-engine/blog-render.mjs          escribe blog/
 //       node seo-engine/blog-render.mjs --check  falla si blog/ no coincide con la fuente
+//       node seo-engine/blog-render.mjs --hash content/blog/<slug>.md   hash de contenido
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,16 +22,73 @@ export const AUTHOR = "Equipo Jurídico de LegalPrevent";
 export const REVIEWER = { name: "Luis Martín Grecco", title: "Abogado" };
 const STATUSES = ["draft", "in_review", "approved"];
 const SOURCE_STATUSES = { vigente: "Vigente", proyecto: "Proyecto (no vigente)", derogada: "Derogada" };
+// Campos que cambian al aprobar: no forman parte del contenido que revisa el abogado.
+const APPROVAL_FIELDS = ["review_status", "approved_at", "approval"];
 
 const escape = (text) =>
   String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 const longDate = (iso) => {
   const [y, m, d] = iso.split("-");
   return `${d}/${m}/${y}`;
 };
 
-export function parseSource(text, file = "(fuente)") {
+// ---- Fechas -----------------------------------------------------------------------
+export const isCalendarDate = (value) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+const todayUtc = () => new Date().toISOString().slice(0, 10);
+
+// ---- Enlaces ----------------------------------------------------------------------
+// Devuelve null si el destino es seguro, o el motivo del rechazo.
+export function linkProblem(target) {
+  if (typeof target !== "string" || !target || /[\s<>"'`\\]/.test(target) || /[\u0000-\u001f\u007f]/.test(target)) {
+    return "destino vacío o con caracteres no permitidos";
+  }
+  if (target.startsWith("/")) {
+    if (target.startsWith("//")) return "ruta con doble barra inicial (protocolo relativo)";
+    if (/(^|\/)\.\.(\/|$)/.test(target)) return "ruta con '..'";
+    if (target === "/en" || target.startsWith("/en/")) return "el blog es solo en español: no se enlaza a /en/";
+    return /^\/[A-Za-z0-9\-._~/%?#=&]*$/.test(target) ? null : "ruta con caracteres no permitidos";
+  }
+  let url;
+  try {
+    url = new URL(target);
+  } catch {
+    return "URL no válida";
+  }
+  if (url.protocol !== "https:") return "solo se admiten enlaces https";
+  if (url.username || url.password) return "URL con credenciales";
+  if (!url.hostname.includes(".")) return "host no válido";
+  return null;
+}
+
+const LINK_PATTERN = /\[([^\]]*)\]\(([^)]*)\)/g;
+
+function assertLinks(text, file) {
+  for (const [, , target] of text.matchAll(LINK_PATTERN)) {
+    const problem = linkProblem(target);
+    if (problem) throw new Error(`${file}: enlace rechazado (${target}): ${problem}`);
+  }
+}
+
+// ---- Contenido y aprobación -------------------------------------------------------
+const canonical = (value) =>
+  Array.isArray(value)
+    ? value.map(canonical)
+    : value && typeof value === "object"
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
+      : value;
+
+// Hash del contenido que revisa el abogado: todo salvo los campos que cambian al aprobar.
+export function contentHash(meta, body) {
+  const reviewed = Object.fromEntries(Object.entries(meta).filter(([key]) => !APPROVAL_FIELDS.includes(key)));
+  const text = JSON.stringify({ meta: canonical(reviewed), body: body.replace(/\r\n/g, "\n").trim() });
+  return createHash("sha256").update(text).digest("hex");
+}
+
+export function parseRaw(text, file = "(fuente)") {
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) throw new Error(`${file}: falta el bloque JSON entre '---'`);
   let meta;
@@ -34,10 +97,15 @@ export function parseSource(text, file = "(fuente)") {
   } catch (error) {
     throw new Error(`${file}: el bloque inicial no es JSON válido (${error.message})`);
   }
-  return { meta: validate(meta, file), body: match[2].trim() };
+  return { meta, body: match[2].trim() };
 }
 
-export function validate(meta, file = "(fuente)") {
+export function parseSource(text, file = "(fuente)", options = {}) {
+  const { meta, body } = parseRaw(text, file);
+  return { meta: validate(meta, body, { file, ...options }), body };
+}
+
+export function validate(meta, body, { file = "(fuente)", today = todayUtc() } = {}) {
   const fail = (message) => {
     throw new Error(`${file}: ${message}`);
   };
@@ -46,25 +114,50 @@ export function validate(meta, file = "(fuente)") {
     if (typeof meta[key] !== "string" || !meta[key].trim()) fail(`falta ${key}`);
   }
   for (const key of ["date_published", "date_modified"]) {
-    if (!isoDate.test(meta[key] ?? "")) fail(`${key} debe ser AAAA-MM-DD`);
+    if (!isCalendarDate(meta[key])) fail(`${key} debe ser una fecha real AAAA-MM-DD`);
+    if (meta[key] > today) fail(`${key} no puede ser futura`);
   }
   if (meta.date_modified < meta.date_published) fail("date_modified anterior a date_published");
   if (!STATUSES.includes(meta.review_status)) fail(`review_status debe ser uno de ${STATUSES.join(", ")}`);
+  if ("approved_by" in meta) fail("approved_by ya no se admite: la aprobación se acredita con el bloque approval");
   if (meta.review_status === "approved") {
-    if (!isoDate.test(meta.approved_at ?? "")) fail("un artículo aprobado necesita approved_at (AAAA-MM-DD)");
-    if (meta.approved_by !== REVIEWER.name) fail(`approved_by debe ser "${REVIEWER.name}"`);
+    if (!isCalendarDate(meta.approved_at)) fail("un artículo aprobado necesita approved_at (fecha real AAAA-MM-DD)");
+    if (meta.approved_at > today) fail("approved_at no puede ser futura");
+    if (meta.approved_at < meta.date_modified) fail("approved_at anterior a date_modified");
+    const approval = meta.approval;
+    if (!approval || !Number.isInteger(approval.pr) || approval.pr < 1) fail("approval.pr debe ser el número de la PR");
+    if (!/^[0-9a-f]{40}$/.test(approval.commit ?? "")) fail("approval.commit debe ser un SHA de 40 caracteres");
+    if (!/^[0-9a-f]{64}$/.test(approval.content_sha256 ?? "")) fail("approval.content_sha256 debe ser un SHA-256");
+    if (approval.content_sha256 !== contentHash(meta, body)) {
+      fail("el contenido cambió después de la aprobación: requiere una nueva revisión");
+    }
+  } else if ("approval" in meta || "approved_at" in meta) {
+    fail("un artículo sin aprobar no puede llevar approval ni approved_at");
   }
+  assertLinks(body, file);
   for (const source of meta.sources ?? []) {
-    if (!source.title || !/^https:\/\//.test(source.url ?? "")) fail("cada fuente necesita title y url https");
+    if (!source.title) fail("cada fuente necesita title");
+    const problem = linkProblem(source.url);
+    if (problem || !source.url.startsWith("https://")) fail(`url de fuente rechazada (${source.url}): ${problem ?? "debe ser https"}`);
     if (!(source.status in SOURCE_STATUSES)) fail(`estado de fuente inválido: ${source.status}`);
-    if (!isoDate.test(source.consulted_at ?? "")) fail("cada fuente necesita consulted_at (AAAA-MM-DD)");
+    if (!isCalendarDate(source.consulted_at) || source.consulted_at > today) {
+      fail("cada fuente necesita consulted_at (fecha real, no futura)");
+    }
   }
   return meta;
 }
 
+const isApproved = ({ meta }) => meta.review_status === "approved";
+const isPublishable = (article, includeFixtures) => isApproved(article) && (includeFixtures || article.meta.fixture !== true);
+
+// ---- Render -----------------------------------------------------------------------
 function inline(text) {
   return escape(text)
-    .replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+|\/[^)\s]*)\)/g, (_, label, url) => `<a href="${url}">${label}</a>`)
+    .replace(LINK_PATTERN, (_, label, target) => {
+      const problem = linkProblem(target.replace(/&amp;/g, "&"));
+      if (problem) throw new Error(`enlace rechazado (${target}): ${problem}`);
+      return `<a href="${target}">${label}</a>`;
+    })
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 }
@@ -158,8 +251,11 @@ ${footer(up)}
 `;
 }
 
-export function renderArticle({ meta, body }) {
+// `preview: true` permite renderizar un borrador (con noindex) solo para revisarlo en local;
+// nunca lo usa renderAll ni la CLI de escritura.
+export function renderArticle({ meta, body }, { preview = false } = {}) {
   const approved = meta.review_status === "approved";
+  if (!approved && !preview) throw new Error(`${meta.slug}: un artículo sin aprobar no genera HTML público`);
   const path = `/blog/${meta.slug}/`;
   const url = BASE + path;
   const sources = (meta.sources ?? [])
@@ -247,9 +343,9 @@ export function renderArticle({ meta, body }) {
   });
 }
 
-export function renderIndex(articles) {
+export function renderIndex(articles, { includeFixtures = false } = {}) {
   const published = articles
-    .filter(({ meta }) => meta.review_status === "approved")
+    .filter((article) => isPublishable(article, includeFixtures))
     .sort((a, b) => b.meta.date_published.localeCompare(a.meta.date_published));
   const items = published.length
     ? published
@@ -299,38 +395,62 @@ ${items}
   });
 }
 
-export function renderAll(articles) {
-  const files = new Map([["blog/index.html", renderIndex(articles)]]);
-  for (const article of articles) files.set(`blog/${article.meta.slug}/index.html`, renderArticle(article));
+// Salida pública: el índice y SOLO los artículos aprobados. Borradores y fixtures no generan nada.
+export function renderAll(articles, { includeFixtures = false } = {}) {
+  const files = new Map([["blog/index.html", renderIndex(articles, { includeFixtures })]]);
+  for (const article of articles) {
+    if (isPublishable(article, includeFixtures)) files.set(`blog/${article.meta.slug}/index.html`, renderArticle(article));
+  }
   return files;
 }
 
-export function loadArticles(dir) {
+export function loadArticles(dir, options = {}) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
     .filter((name) => name.endsWith(".md"))
     .sort()
-    .map((name) => parseSource(readFileSync(resolve(dir, name), "utf8"), name));
+    .map((name) => parseSource(readFileSync(resolve(dir, name), "utf8"), name, options));
+}
+
+// Compara la salida esperada con blog/ en disco. Incluye ficheros huérfanos: cualquier
+// blog/<slug>/index.html que no corresponda a un artículo aprobado es un desfase.
+export function checkOutput(root, files) {
+  const drift = [];
+  for (const [path, html] of files) {
+    const target = resolve(root, path);
+    if (!existsSync(target) || readFileSync(target, "utf8") !== html) drift.push(`Desfase: ${path}`);
+  }
+  const blog = resolve(root, "blog");
+  if (existsSync(blog)) {
+    for (const entry of readdirSync(blog, { withFileTypes: true })) {
+      const path = entry.isDirectory() ? `blog/${entry.name}/index.html` : `blog/${entry.name}`;
+      if (!files.has(path)) drift.push(`Sobrante (no corresponde a un artículo aprobado): ${path}`);
+    }
+  }
+  return drift;
 }
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const files = renderAll(loadArticles(resolve(root, "content/blog")));
-  const check = process.argv.includes("--check");
-  let drift = 0;
-  for (const [path, html] of files) {
-    const target = resolve(root, path);
-    if (check) {
-      if (!existsSync(target) || readFileSync(target, "utf8") !== html) {
-        console.error(`Desfase: ${path}`);
-        drift++;
-      }
+  const hashIndex = process.argv.indexOf("--hash");
+  if (hashIndex !== -1) {
+    const { meta, body } = parseRaw(readFileSync(resolve(process.argv[hashIndex + 1]), "utf8"));
+    console.log(contentHash(meta, body));
+  } else {
+    // La CLI nunca incluye fixtures: solo lee content/blog.
+    const files = renderAll(loadArticles(resolve(root, "content/blog")));
+    if (process.argv.includes("--check")) {
+      const drift = checkOutput(root, files);
+      drift.forEach((line) => console.error(line));
+      if (drift.length) process.exit(1);
     } else {
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, html);
-      console.log(`Escrito: ${path}`);
+      for (const [path, html] of files) {
+        const target = resolve(root, path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, html);
+        console.log(`Escrito: ${path}`);
+      }
     }
   }
-  if (drift) process.exit(1);
 }
