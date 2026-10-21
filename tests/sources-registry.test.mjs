@@ -10,7 +10,11 @@ import {
   assertRegistry,
   blockIdFor,
   citationProblems,
+  ENGINE_BY_AUTHORITY,
+  NORMATIVE_BINDINGS,
+  locatorFitsAuthority,
   lockProblems,
+  registryEntryHash,
   registryProblems,
   urlProblem,
 } from "../seo-engine/sources/schema.mjs";
@@ -33,26 +37,66 @@ const guia = () => ({
 const problemsFor = (entry) => registryProblems({ version: 1, sources: [entry] }, { today: TODAY });
 const reg = (patch) => problemsFor({ ...boe(), ...patch });
 
-test("el registro inicial es válido, solo contiene fuentes oficiales del BOE y deriva binding del tipo", () => {
+test("el registro inicial es válido y cada fuente deriva su naturaleza jurídica de su tipo", () => {
   assert.deepEqual(registryProblems(registry, { today: TODAY }), []);
   assert.doesNotThrow(() => assertRegistry(registry, { today: TODAY }));
-  assert.ok(registry.sources.length >= 6);
+  const boes = registry.sources.filter((entry) => entry.authority === "BOE");
+  const web = registry.sources.filter((entry) => entry.authority !== "BOE");
+  assert.ok(boes.length >= 6 && web.length >= 4);
   for (const entry of registry.sources) {
-    assert.equal(entry.authority, "BOE");
-    assert.equal(entry.kind, "texto_consolidado");
     assert.equal(entry.binding, BINDING_BY_KIND[entry.kind]);
+    assert.equal(new URL(entry.urls.canonical).hostname, { BOE: "www.boe.es", AEPD: "www.aepd.es", INSST: "www.insst.es" }[entry.authority]);
+  }
+  for (const entry of boes) {
+    assert.equal(entry.kind, "texto_consolidado");
     assert.match(entry.official_ref.boe_id, /^BOE-A-\d{4}-\d+$/);
-    assert.equal(new URL(entry.urls.canonical).hostname, "www.boe.es");
+  }
+  for (const entry of web) {
+    assert.equal(entry.kind, "guia");
+    assert.equal(entry.binding, "no_vinculante");
+    assert.ok(entry.official_ref.reference.length >= 8, "título oficial");
   }
   assert.equal(new Set(registry.sources.map((s) => s.id)).size, registry.sources.length, "ids únicos");
 });
 
-test("la distinción entre vinculante, informativo y no vinculante está fijada por el tipo", () => {
-  assert.deepEqual(BINDING_BY_KIND, { disposicion: "vinculante", texto_consolidado: "informativo", guia: "no_vinculante" });
+test("las cuatro naturalezas jurídicas son distintas y solo la norma puede apoyar lo que dice la norma", () => {
+  assert.deepEqual(BINDING_BY_KIND, {
+    disposicion: "vinculante",
+    texto_consolidado: "informativo",
+    criterio_administrativo: "criterio_administrativo",
+    guia: "no_vinculante",
+  });
+  assert.deepEqual(NORMATIVE_BINDINGS, ["vinculante", "informativo"]);
+  assert.deepEqual(ENGINE_BY_AUTHORITY, { BOE: "boe-api-v1", AEPD: "web-v1", INSST: "web-v1" });
   assert.deepEqual(problemsFor({ ...boe(), kind: "disposicion", binding: "vinculante" }), []);
   assert.match(reg({ binding: "vinculante" })[0], /binding debe ser "informativo"/);
   assert.match(problemsFor({ ...guia(), binding: "vinculante" }).join(), /binding debe ser "no_vinculante"/);
   assert.deepEqual(problemsFor(guia()), []);
+  // Criterio administrativo (informes, resoluciones, criterios de una autoridad): solo AEPD, con su propia naturaleza.
+  const criterio = { ...guia(), id: "aepd-informe-ejemplo", kind: "criterio_administrativo", binding: "criterio_administrativo" };
+  assert.deepEqual(problemsFor(criterio), []);
+  assert.match(problemsFor({ ...criterio, binding: "no_vinculante" }).join(), /binding debe ser "criterio_administrativo"/);
+  assert.match(problemsFor({ ...criterio, authority: "INSST", urls: { canonical: "https://www.insst.es/x" } }).join(), /INSST solo admite kind guia/);
+  assert.match(reg({ kind: "criterio_administrativo", binding: "criterio_administrativo" }).join(), /BOE solo admite kind/);
+});
+
+test("las URL de documento e índice solo existen en AEPD e INSST", () => {
+  const withDocument = { ...guia(), urls: { canonical: "https://www.aepd.es/guias/ejemplo.pdf", index: "https://www.aepd.es/guias-y-herramientas/guias", document: "https://www.aepd.es/guias/ejemplo.pdf" } };
+  assert.deepEqual(problemsFor(withDocument), []);
+  assert.match(reg({ urls: { ...boe().urls, document: "https://www.boe.es/x.pdf" } }).join(), /urls: clave no permitida "document"/);
+  assert.match(problemsFor({ ...guia(), urls: { ...guia().urls, consolidated: "https://www.aepd.es/x" } }).join(), /urls: clave no permitida "consolidated"/);
+  assert.match(problemsFor({ ...guia(), urls: { ...guia().urls, index: "https://example.com/guias" } }).join(), /urls.index/);
+  assert.match(problemsFor({ ...guia(), urls: { ...guia().urls, document: "http://www.aepd.es/x.pdf" } }).join(), /urls.document/);
+});
+
+test("el hash de la entrada del registro cambia con cualquier modificación, incluida una reclasificación", () => {
+  const base = registryEntryHash(boe());
+  assert.equal(registryEntryHash(boe()), base, "estable");
+  assert.equal(registryEntryHash({ ...boe(), official_ref: { ...boe().official_ref } }), base, "no depende del orden de las claves");
+  assert.equal(registryEntryHash(Object.fromEntries(Object.entries(boe()).reverse())), base);
+  for (const patch of [{ title: "Otro título distinto" }, { kind: "disposicion", binding: "vinculante" }, { urls: { canonical: "https://www.boe.es/otra" } }]) {
+    assert.notEqual(registryEntryHash({ ...boe(), ...patch }), base, JSON.stringify(patch).slice(0, 40));
+  }
 });
 
 test("el registro es estricto: claves desconocidas, duplicados y formas inválidas se rechazan", () => {
@@ -88,6 +132,7 @@ test("los identificadores y las URL deben ser oficiales: https, host exacto y si
 const validLock = () => ({
   verified_at: "2026-10-21",
   engine: "boe-api-v1",
+  source_sha256: "c".repeat(64),
   boe_id: "BOE-A-2018-16673",
   block_id: "a5",
   block_fecha_actualizacion: "20181206",
@@ -99,6 +144,53 @@ const validLock = () => ({
   reasons: [],
 });
 const validCitation = () => ({ id: "c1", source: "boe-lo-3-2018", type: "norma", locator: { article: "5" }, quote: "deber de confidencialidad al que se refiere" });
+
+const validWebLock = () => ({
+  verified_at: "2026-10-21",
+  engine: "web-v1",
+  source_sha256: "c".repeat(64),
+  final_url: "https://www.insst.es/documentacion/catalogo-de-publicaciones/guia",
+  http_status: 200,
+  content_type: "text/html",
+  content_sha256: "a".repeat(64),
+  text_sha256: "b".repeat(64),
+  last_modified: "Thu, 19 Nov 2020 15:39:23 GMT",
+  document: { final_url: "https://www.insst.es/documents/94886/guia.pdf", content_type: "application/pdf", content_sha256: "d".repeat(64), last_modified: null },
+  quote_sha256: null,
+  status: "needs_review",
+  reasons: ["vigencia_no_acreditable", "solo_existencia"],
+});
+
+test("el candado web exige sus campos propios y no admite los del BOE", () => {
+  assert.deepEqual(lockProblems(validWebLock()), []);
+  assert.deepEqual(lockProblems({ ...validWebLock(), document: null, text_sha256: null, last_modified: null }), []);
+  assert.match(lockProblems({ ...validWebLock(), boe_id: "BOE-A-2018-16673" }).join(), /clave no permitida "boe_id"/);
+  assert.match(lockProblems({ ...validLock(), final_url: "https://www.boe.es/x" }).join(), /clave no permitida "final_url"/);
+  assert.match(lockProblems({ ...validWebLock(), http_status: 403 }).join(), /http_status debe ser 200/);
+  assert.match(lockProblems({ ...validWebLock(), final_url: "http://www.insst.es/x" }).join(), /final_url/);
+  assert.match(lockProblems({ ...validWebLock(), content_sha256: "abc" }).join(), /content_sha256/);
+  assert.match(lockProblems({ ...validWebLock(), content_type: "texto" }).join(), /content_type/);
+  assert.match(lockProblems({ ...validWebLock(), document: { final_url: "https://www.insst.es/x", content_type: "application/pdf", content_sha256: "zz" } }).join(), /document.content_sha256/);
+  assert.match(lockProblems({ ...validWebLock(), document: { ...validWebLock().document, extra: 1 } }).join(), /clave no permitida "extra"/);
+  assert.match(lockProblems({ ...validWebLock(), source_sha256: undefined }).join(), /source_sha256/);
+  assert.match(lockProblems({ ...validLock(), source_sha256: undefined }).join(), /source_sha256/);
+  assert.match(lockProblems({ ...validWebLock(), engine: "otro" }).join(), /engine/);
+});
+
+test("los localizadores son del tipo que admite cada fuente: artículo o bloque en el BOE, sección o página en AEPD/INSST", () => {
+  assert.equal(locatorFitsAuthority({ article: "5" }, "BOE"), true);
+  assert.equal(locatorFitsAuthority({ block: "da1" }, "BOE"), true);
+  assert.equal(locatorFitsAuthority({ section: "Introducción" }, "BOE"), false);
+  assert.equal(locatorFitsAuthority({ section: "Introducción" }, "INSST"), true);
+  assert.equal(locatorFitsAuthority({ page: 12 }, "AEPD"), true);
+  assert.equal(locatorFitsAuthority({ article: "5" }, "AEPD"), false);
+  assert.deepEqual(citationProblems({ ...validCitation(), locator: { section: "3. Responsabilidades" } }), []);
+  assert.deepEqual(citationProblems({ ...validCitation(), locator: { page: 12 } }), []);
+  assert.match(citationProblems({ ...validCitation(), locator: { section: "ab" } }).join(), /locator.section/);
+  assert.match(citationProblems({ ...validCitation(), locator: { page: 0 } }).join(), /locator.page/);
+  assert.match(citationProblems({ ...validCitation(), locator: { page: "12" } }).join(), /locator.page/);
+  assert.match(citationProblems({ ...validCitation(), locator: { page: 12, section: "Intro" } }).join(), /exactamente uno/);
+});
 
 test("una cita válida pasa y las inválidas se rechazan con su motivo", () => {
   assert.deepEqual(citationProblems(validCitation()), []);

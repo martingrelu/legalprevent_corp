@@ -44,3 +44,17 @@ export function quoteMatches(text, quote) {
   }
   return { ok: true };
 }
+
+// Hash de bytes (PDF y otros recursos binarios).
+export const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+// JSON canónico (claves ordenadas, sin espacios): base de los hashes de entradas del registro.
+export function canonicalJson(value) {
+  const sort = (item) =>
+    Array.isArray(item)
+      ? item.map(sort)
+      : item && typeof item === "object"
+        ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, sort(item[key])]))
+        : item;
+  return JSON.stringify(sort(value));
+}

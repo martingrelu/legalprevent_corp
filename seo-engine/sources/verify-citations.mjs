@@ -13,7 +13,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadArticles } from "../blog-render.mjs";
-import { blockIdFor, FAILED_REASONS, REVIEW_REASONS, ackProblems, assertRegistry, citationProblems, lockProblems } from "./schema.mjs";
+import {
+  ENGINE_BY_AUTHORITY,
+  FAILED_REASONS,
+  NORMATIVE_BINDINGS,
+  REVIEW_REASONS,
+  ackProblems,
+  assertRegistry,
+  blockIdFor,
+  citationProblems,
+  locatorFitsAuthority,
+  lockProblems,
+  registryEntryHash,
+  urlProblem,
+} from "./schema.mjs";
 import { normalizeText, sha256Hex } from "./text.mjs";
 
 export const LOCK_MAX_AGE_DAYS = 30;
@@ -54,9 +67,10 @@ export function verifyArticleCitations({ meta, body }, registry, { now = new Dat
     const entry = bySource.get(citation.source);
     if (!entry) return items.push(itemFor(citation.id, citation.source, ["fuente_desconocida"]));
     const reasons = [];
-    if (citation.type === "norma" && entry.binding === "no_vinculante") reasons.push("guia_como_norma");
-    if (entry.authority !== "BOE") reasons.push("adaptador_no_implementado"); // F2.2: AEPD e INSST aún no se verifican
-    else reasons.push(...lockReasons(citation, entry, { today, reference, maxLockAgeDays }));
+    // Solo la norma (BOE) puede apoyar lo que dice la norma; las guías y los criterios orientan, no obligan.
+    if (citation.type === "norma" && !NORMATIVE_BINDINGS.includes(entry.binding)) reasons.push(entry.binding === "criterio_administrativo" ? "criterio_como_norma" : "guia_como_norma");
+    if (!locatorFitsAuthority(citation.locator, entry.authority)) reasons.push("localizador_incompatible");
+    reasons.push(...lockReasons(citation, entry, { today, reference, maxLockAgeDays }));
     items.push(itemFor(citation.id, citation.source, reasons));
   });
 
@@ -94,8 +108,18 @@ export function verifyArticleCitations({ meta, body }, registry, { now = new Dat
 function lockReasons(citation, entry, { today, reference, maxLockAgeDays }) {
   const lock = citation.lock;
   if (lock === undefined) return ["sin_candado"];
-  if (lockProblems(lock).length) return ["candado_inconsistente"];
-  if (lock.boe_id !== entry.official_ref.boe_id || lock.block_id !== blockIdFor(citation.locator)) return ["candado_inconsistente"];
+  if (lockProblems(lock).length || lock.engine !== ENGINE_BY_AUTHORITY[entry.authority]) return ["candado_inconsistente"];
+  // Si la entrada del registro cambió después de calcular el candado (p. ej. para reclasificar una guía como norma),
+  // el candado ya no vale: hay que volver a comprobar y volver a firmar.
+  if (lock.source_sha256 !== registryEntryHash(entry)) return ["registro_modificado"];
+  if (entry.authority === "BOE") {
+    if (lock.boe_id !== entry.official_ref.boe_id || lock.block_id !== blockIdFor(citation.locator)) return ["candado_inconsistente"];
+  } else {
+    const hasDocument = entry.urls.document !== undefined;
+    if (urlProblem(lock.final_url, entry.authority) || hasDocument !== (lock.document !== null) || (lock.document && urlProblem(lock.document.final_url, entry.authority))) {
+      return ["candado_inconsistente"];
+    }
+  }
   const expectedQuote = citation.quote === undefined ? null : sha256Hex(normalizeText(citation.quote));
   if (lock.quote_sha256 !== expectedQuote) return ["cita_editada_tras_candado"];
   if (lock.verified_at > today) return ["candado_futuro"];

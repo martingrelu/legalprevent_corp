@@ -2,6 +2,36 @@
   "version": 1,
   "sources": [
     {
+      "id": "aepd-guia-calidad-datos-ia",
+      "authority": "AEPD",
+      "kind": "guia",
+      "binding": "no_vinculante",
+      "title": "Exactitud, idoneidad y calidad de los datos en tratamientos de datos personales con Inteligencia Artificial",
+      "official_ref": {
+        "reference": "Exactitud, idoneidad y calidad de los datos en tratamientos de datos personales con Inteligencia Artificial"
+      },
+      "urls": {
+        "canonical": "https://www.aepd.es/guias/calidad-datos-inteligencia-artificial.pdf",
+        "index": "https://www.aepd.es/guias-y-herramientas/guias"
+      },
+      "added_at": "2026-10-21"
+    },
+    {
+      "id": "aepd-guia-sistemas-algoritmicos-laboral",
+      "authority": "AEPD",
+      "kind": "guia",
+      "binding": "no_vinculante",
+      "title": "Sistemas algorítmicos en el ámbito laboral. Transparencia y garantías de protección de datos",
+      "official_ref": {
+        "reference": "Sistemas algorítmicos en el ámbito laboral. Transparencia y garantías de protección de datos"
+      },
+      "urls": {
+        "canonical": "https://www.aepd.es/guias/Nota-RD-723-2026-AI-00009-2026.pdf",
+        "index": "https://www.aepd.es/guias-y-herramientas/guias"
+      },
+      "added_at": "2026-10-21"
+    },
+    {
       "id": "boe-l-2-2023",
       "authority": "BOE",
       "kind": "texto_consolidado",
@@ -94,6 +124,36 @@
       },
       "urls": {
         "canonical": "https://www.boe.es/buscar/act.php?id=BOE-A-2015-11430"
+      },
+      "added_at": "2026-10-21"
+    },
+    {
+      "id": "insst-gt-integracion-prl-sistema-gestion",
+      "authority": "INSST",
+      "kind": "guia",
+      "binding": "no_vinculante",
+      "title": "Guía técnica para la integración de la prevención de riesgos laborales en el sistema general de gestión de la empresa - Año 2008",
+      "official_ref": {
+        "reference": "Guía técnica para la integración de la prevención de riesgos laborales en el sistema general de gestión de la empresa - Año 2008"
+      },
+      "urls": {
+        "canonical": "https://www.insst.es/documentacion/catalogo-de-publicaciones/guia-tecnica-para-la-integracion-de-la-prevencion-de-riesgos-laborales-en-el-sistema-general-de-gestion-de-la-empresa",
+        "document": "https://www.insst.es/documents/94886/789467/Guia+tecnica+para+la+integraci%C3%B3n+de+la+prevenci%C3%B3n+de+riesgos+laborales+en+el+sistema+general+de+gesti%C3%B3n+de+la+empresa.pdf/7a89441a-9ddd-4f14-acfb-656c7d589859?t=1727247377686"
+      },
+      "added_at": "2026-10-21"
+    },
+    {
+      "id": "insst-gt-simplificacion-documental",
+      "authority": "INSST",
+      "kind": "guia",
+      "binding": "no_vinculante",
+      "title": "Guía técnica para la Simplificación documental - Año 2012",
+      "official_ref": {
+        "reference": "Guía técnica para la Simplificación documental - Año 2012"
+      },
+      "urls": {
+        "canonical": "https://www.insst.es/documentacion/catalogo-de-publicaciones/guia-tecnica-para-la-simplificacion-documental-",
+        "document": "https://www.insst.es/documents/94886/789467/Gu%C3%ADa+t%C3%A9cnica+para+la+Simplificaci%C3%B3n+documental.pdf/8a94430e-7fd5-4ee4-9928-174a45255eb4?t=1605800363817"
       },
       "added_at": "2026-10-21"
     }
