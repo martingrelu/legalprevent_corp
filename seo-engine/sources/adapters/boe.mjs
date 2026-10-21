@@ -6,7 +6,7 @@
 //
 // Principio: cualquier duda se convierte en `needs_review` o `failed`, nunca en `verified`. Un error de red,
 // una respuesta inesperada o un 5xx es `fuente_inalcanzable` (no verificado), no una validación.
-import { blockIdFor } from "../schema.mjs";
+import { blockIdFor, registryEntryHash } from "../schema.mjs";
 import { normalizeText, quoteMatches, sha256Hex } from "../text.mjs";
 
 export const BOE_API = "https://www.boe.es/datosabiertos/api/legislacion-consolidada/id";
@@ -130,6 +130,7 @@ export function evaluateBoe({ entry, citation, meta, index, block, now = new Dat
     lock: {
       verified_at: now.toISOString().slice(0, 10),
       engine: "boe-api-v1",
+      source_sha256: registryEntryHash(entry),
       boe_id: meta.boeId,
       block_id: blockId,
       block_fecha_actualizacion: index.get(blockId).fechaActualizacion,
@@ -147,6 +148,7 @@ export function evaluateBoe({ entry, citation, meta, index, block, now = new Dat
 // fuente haya cambiado desde su fecha de comprobación es inconsistente (forjado o erróneo): `failed`.
 export function compareWithLock(live, lock) {
   if (live.status === "failed") return live;
+  if (live.lock.source_sha256 !== lock.source_sha256) return { status: "failed", reasons: ["registro_modificado"] };
   const verifiedAt = lock.verified_at.replace(/-/g, "");
   const reasons = [];
   if (live.lock.text_sha256 !== lock.text_sha256) {

@@ -14,7 +14,7 @@ import {
   verifyBoeCitation,
   versionsAt,
 } from "../seo-engine/sources/adapters/boe.mjs";
-import { lockProblems } from "../seo-engine/sources/schema.mjs";
+import { lockProblems, registryEntryHash } from "../seo-engine/sources/schema.mjs";
 import { normalizeText, quoteMatches, sha256Hex } from "../seo-engine/sources/text.mjs";
 
 const fixture = (name) => readFileSync(new URL(`./fixtures/boe/${name}`, import.meta.url), "utf8");
@@ -108,6 +108,7 @@ test("una cita literal en la versión vigente es verified y genera un candado co
     {
       verified_at: "2026-10-21",
       engine: "boe-api-v1",
+      source_sha256: registryEntryHash(lopdgdd),
       boe_id: "BOE-A-2018-16673",
       block_id: "a5",
       block_fecha_actualizacion: index.get("a5").fechaActualizacion,
@@ -194,6 +195,9 @@ test("compareWithLock: sin cambios verifica; cambios reales exigen revisión; ca
   assert.deepEqual([forged.status, forged.reasons], ["failed", ["candado_inconsistente"]]);
   // Un fallo en vivo se mantiene.
   assert.equal(compareWithLock(evaluate({ meta: { ...meta, derogada: "S" } }), live.lock).status, "failed");
+  // Si la entrada del registro cambió después del candado, el candado ya no vale.
+  const reclassified = compareWithLock(live, { ...live.lock, source_sha256: "d".repeat(64) });
+  assert.deepEqual([reclassified.status, reclassified.reasons], ["failed", ["registro_modificado"]]);
 });
 
 // ---- Cliente HTTP -----------------------------------------------------------------------------

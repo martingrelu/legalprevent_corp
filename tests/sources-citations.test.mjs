@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { evaluateBoe, parseBlock, parseIndex, parseMetadata } from "../seo-engine/sources/adapters/boe.mjs";
 import { contentHash } from "../seo-engine/blog-render.mjs";
+import { createWebClient, verifyWebCitation } from "../seo-engine/sources/adapters/web.mjs";
+import { registryEntryHash } from "../seo-engine/sources/schema.mjs";
 import { formatItem, verifyArticleCitations } from "../seo-engine/sources/verify-citations.mjs";
 
 const fixture = (name) => readFileSync(new URL(`./fixtures/boe/${name}`, import.meta.url), "utf8");
@@ -28,6 +30,26 @@ const NOW = new Date("2026-10-21T12:00:00Z");
 const QUOTE = "estarán sujetas al deber de confidencialidad al que se refiere el artículo 5.1.f) del Reglamento (UE) 2016/679";
 const parts = { meta: parseMetadata(fixture("metadatos-BOE-A-2018-16673.json")), index: parseIndex(fixture("indice-BOE-A-2018-16673.json")), block: parseBlock(fixture("bloque-BOE-A-2018-16673-a5.xml")) };
 const lopdgdd = registry.sources.find((entry) => entry.id === "boe-lo-3-2018");
+
+// Fuentes web (AEPD/INSST): registro real y candados calculados por el adaptador sobre páginas reales recortadas.
+const insst = registry.sources.find((entry) => entry.id === "insst-gt-simplificacion-documental");
+const aepd = registry.sources.find((entry) => entry.id === "aepd-guia-calidad-datos-ia");
+const webFixture = (name) => readFileSync(new URL(`./fixtures/web/${name}`, import.meta.url), "utf8");
+const reply = (type, body) => ({ status: 200, headers: new Headers({ "content-type": type }), arrayBuffer: async () => { const b = Buffer.from(body); return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); } });
+const webRoutes = {
+  "https://www.insst.es/robots.txt": reply("text/plain", webFixture("robots-insst.txt")),
+  "https://www.aepd.es/robots.txt": reply("text/plain", webFixture("robots-aepd.txt")),
+  [insst.urls.canonical]: reply("text/html; charset=UTF-8", webFixture("insst-ficha-simplificacion.html")),
+  [insst.urls.document]: reply("application/pdf", "%PDF-1.4 sintético"),
+  [aepd.urls.canonical]: reply("application/pdf", "%PDF-1.4 sintético"),
+  [aepd.urls.index]: reply("text/html; charset=UTF-8", webFixture("aepd-listado-guias.html")),
+};
+const webClient = () => createWebClient({ fetchImpl: async (url) => webRoutes[url] ?? { status: 404, headers: new Headers(), arrayBuffer: async () => new ArrayBuffer(0) }, delayMs: 0, sleep: async () => {} });
+const webLockFor = async (entry, quote) => structuredClone((await verifyWebCitation({ client: webClient(), entry, citation: { locator: { section: "Resumen" }, quote }, now: NOW })).lock);
+const INSST_LOCK = await webLockFor(insst, undefined);
+const AEPD_LOCK = await webLockFor(aepd, undefined);
+const webCitation = (patch = {}) => ({ id: "g1", source: insst.id, type: "criterio", locator: { section: "Resumen" }, lock: structuredClone(INSST_LOCK), ...patch });
+const ackFor = (id, reasons) => reasons.map((reason) => ({ citation: id, reason, note: `Reconocido tras revisar la fuente (${reason}).` }));
 
 // Candado REAL: lo calcula el adaptador sobre las respuestas reales del BOE.
 const lockFor = (quote) => structuredClone(evaluateBoe({ entry: lopdgdd, citation: { locator: { article: "5" }, quote }, ...parts, now: NOW }).lock);
@@ -63,19 +85,54 @@ test("una fuente que no está en el registro es una cita inventada: falla", () =
   assert.deepEqual([find(result).failed, result.blocking], [["fuente_desconocida"], true]);
 });
 
-test("una guía no vinculante no puede apoyar una afirmación sobre una norma", () => {
-  const asNorm = run(article({ citations: [{ id: "g1", source: "aepd-guia-ejemplo", type: "norma", locator: { block: "a1" } }] }), {}, withGuide);
+test("una guía o un criterio administrativo no pueden apoyar una afirmación sobre lo que dice la norma", () => {
+  const asNorm = run(article({ citations: [webCitation({ type: "norma" })] }));
   assert.ok(find(asNorm, "g1").failed.includes("guia_como_norma"));
   assert.equal(asNorm.blocking, true);
-  const asCriterion = run(article({ citations: [{ id: "g1", source: "aepd-guia-ejemplo", type: "criterio", locator: { block: "a1" } }] }), {}, withGuide);
-  assert.deepEqual([find(asCriterion, "g1").status, find(asCriterion, "g1").pending], ["needs_review", ["adaptador_no_implementado"]]);
-  assert.equal(asCriterion.blocking, true, "AEPD e INSST aún no se verifican (F2.2): necesitan reconocimiento humano");
-  const acknowledged = run(
-    article({ citations: [{ id: "g1", source: "aepd-guia-ejemplo", type: "criterio", locator: { block: "a1" } }], review_ack: [{ citation: "g1", reason: "adaptador_no_implementado", note: "Guía revisada a mano en la web de la AEPD." }] }),
-    {},
-    withGuide
-  );
-  assert.deepEqual([find(acknowledged, "g1").acknowledged, acknowledged.blocking], [["adaptador_no_implementado"], false]);
+  const criterio = { ...insst, id: "aepd-informe-ejemplo", authority: "AEPD", kind: "criterio_administrativo", binding: "criterio_administrativo", urls: { canonical: "https://www.aepd.es/informe.pdf" } };
+  const regCriterio = { version: 1, sources: [...registry.sources, criterio] };
+  const asNormCriterio = run(article({ citations: [{ id: "g2", source: criterio.id, type: "norma", locator: { page: 3 }, lock: { ...structuredClone(AEPD_LOCK), source_sha256: registryEntryHash(criterio) } }] }), {}, regCriterio);
+  assert.ok(find(asNormCriterio, "g2").failed.includes("criterio_como_norma"));
+  const asCriterion = run(article({ citations: [{ id: "g2", source: criterio.id, type: "criterio", locator: { page: 3 }, lock: { ...structuredClone(AEPD_LOCK), source_sha256: registryEntryHash(criterio) } }] }), {}, regCriterio);
+  assert.deepEqual(find(asCriterion, "g2").failed, [], "como criterio sí puede citarse (con reconocimiento)");
+});
+
+test("una cita web exige reconocimiento humano por vigencia: nunca basta con que la URL responda", () => {
+  const result = run(article({ citations: [webCitation()] }));
+  assert.deepEqual([find(result, "g1").status, find(result, "g1").pending], ["needs_review", ["vigencia_no_acreditable", "solo_existencia"]]);
+  assert.equal(result.blocking, true);
+  const acknowledged = run(article({ citations: [webCitation()], review_ack: ackFor("g1", ["vigencia_no_acreditable", "solo_existencia"]) }));
+  assert.deepEqual([acknowledged.blocking, find(acknowledged, "g1").acknowledged], [false, ["vigencia_no_acreditable", "solo_existencia"]]);
+  const partial = run(article({ citations: [webCitation()], review_ack: ackFor("g1", ["solo_existencia"]) }));
+  assert.deepEqual([partial.blocking, find(partial, "g1").pending], [true, ["vigencia_no_acreditable"]], "hay que reconocer todos los motivos");
+  const pdf = run(article({ citations: [{ id: "g3", source: aepd.id, type: "criterio", locator: { page: 12 }, lock: structuredClone(AEPD_LOCK) }] }));
+  assert.deepEqual(find(pdf, "g3").pending, ["vigencia_no_acreditable", "solo_existencia"]);
+});
+
+test("el localizador debe ser del tipo de la fuente: sección o página en AEPD/INSST, artículo o bloque en el BOE", () => {
+  for (const result of [run(article({ citations: [webCitation({ locator: { article: "5" } })] })), run(article({ citations: [citation({ locator: { section: "Resumen" } })] }))]) {
+    assert.ok(result.items.some((item) => item.failed.includes("localizador_incompatible")));
+    assert.equal(result.blocking, true);
+  }
+  assert.deepEqual(find(run(article({ citations: [webCitation({ locator: { page: 7 } })] })), "g1").failed, []);
+});
+
+test("si la entrada del registro cambia después del candado, la cita deja de ser válida (y hay que volver a firmar)", () => {
+  // Reclasificar una guía como texto consolidado le permitiría apoyar normas: el hash del candado lo impide.
+  const tampered = { version: 1, sources: registry.sources.map((entry) => (entry.id === insst.id ? { ...entry, title: `${entry.title} (reclasificada)` } : entry)) };
+  assert.deepEqual(find(run(article({ citations: [webCitation()] }), {}, tampered), "g1").failed, ["registro_modificado"]);
+  const boeTampered = { version: 1, sources: registry.sources.map((entry) => (entry.id === "boe-lo-3-2018" ? { ...entry, kind: "disposicion", binding: "vinculante" } : entry)) };
+  assert.deepEqual(find(run(article(), {}, boeTampered)).failed, ["registro_modificado"]);
+});
+
+test("el candado debe ser del motor de su fuente y coherente con las URL registradas", () => {
+  assert.deepEqual(find(run(article({ citations: [webCitation({ lock: lockFor(QUOTE) })] })), "g1").failed, ["candado_inconsistente"], "candado del BOE en una guía");
+  assert.deepEqual(find(run(article({ citations: [citation({ lock: structuredClone(INSST_LOCK) })] }))).failed, ["candado_inconsistente"], "candado web en una norma del BOE");
+  assert.deepEqual(find(run(article({ citations: [webCitation({ lock: { ...structuredClone(INSST_LOCK), document: null } })] })), "g1").failed, ["candado_inconsistente"], "la entrada tiene PDF y el candado no");
+  assert.deepEqual(find(run(article({ citations: [webCitation({ lock: { ...structuredClone(INSST_LOCK), final_url: "https://example.com/guia" } })] })), "g1").failed, ["candado_inconsistente"], "URL final no oficial");
+  const noDocEntry = { ...insst, urls: { canonical: insst.urls.canonical } };
+  const noDocLock = { ...structuredClone(INSST_LOCK), source_sha256: registryEntryHash(noDocEntry) };
+  assert.deepEqual(find(run(article({ citations: [webCitation({ lock: noDocLock })] }), {}, { version: 1, sources: [...registry.sources.filter((e) => e.id !== insst.id), noDocEntry] }), "g1").failed, ["candado_inconsistente"], "el candado trae PDF y la entrada no");
 });
 
 test("editar la cita después del candado, o añadirla o quitarla, invalida el candado", () => {

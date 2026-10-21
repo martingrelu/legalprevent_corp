@@ -11,6 +11,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadArticles, parseRaw } from "../blog-render.mjs";
 import { compareWithLock, createBoeClient, verifyBoeCitation } from "./adapters/boe.mjs";
+import { compareWebWithLock, createWebClient, verifyWebCitation } from "./adapters/web.mjs";
 import { loadRegistry } from "./verify-citations.mjs";
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
@@ -24,7 +25,8 @@ if (isMain) {
     if (mode === "lock" && !slug) throw new Error("--lock necesita el slug del artículo");
     const registry = loadRegistry(resolve(root, "content/sources/registry.json"));
     const bySource = new Map(registry.sources.map((entry) => [entry.id, entry]));
-    const client = createBoeClient();
+    const boe = createBoeClient();
+    const web = createWebClient();
     const articles = loadArticles(resolve(root, "content/blog")).filter(({ meta }) => (slug ? meta.slug === slug : mode === "lock" ? false : meta.review_status === "approved"));
     if (slug && !articles.length) throw new Error(`no existe el artículo ${slug}`);
     let bad = 0;
@@ -33,15 +35,16 @@ if (isMain) {
       const locks = new Map();
       for (const citation of meta.citations ?? []) {
         const entry = bySource.get(citation.source);
-        if (!entry || entry.authority !== "BOE") {
-          console.log(`  ${meta.slug}/${citation.id}: NO VERIFICABLE EN LÍNEA (${entry ? "adaptador_no_implementado" : "fuente_desconocida"})`);
+        if (!entry) {
+          console.log(`  ${meta.slug}/${citation.id}: FAILED — fuente_desconocida`);
           bad++;
           continue;
         }
-        let result = await verifyBoeCitation({ client, entry, citation });
+        const isBoe = entry.authority === "BOE";
+        let result = isBoe ? await verifyBoeCitation({ client: boe, entry, citation }) : await verifyWebCitation({ client: web, entry, citation });
         if (mode === "check") {
           if (!citation.lock) result = { status: "failed", reasons: ["sin_candado"] };
-          else if (!result.inconclusive) result = compareWithLock(result, citation.lock);
+          else if (!result.inconclusive) result = isBoe ? compareWithLock(result, citation.lock) : compareWebWithLock(result, citation.lock);
         }
         console.log(`  ${meta.slug}/${citation.id}: ${result.status.toUpperCase()}${result.reasons.length ? ` — ${result.reasons.join(", ")}` : ""}${result.detail ? ` (${result.detail})` : ""}`);
         if (result.status === "failed" || result.inconclusive) bad++;
