@@ -64,3 +64,27 @@ PR abierto/actualizado ──► GitHub arranca blog-trust.yml DE LA RAMA BASE
      5. verificación offline con la lógica de la rama base
      6. salida saneada; cualquier excepción ⇒ exit 1 (falla cerrado)
 ```
+
+## F2.3b — `sources-live` (comprobación en vivo, estricta, con reintentos)
+
+Tercer job de `blog-trust.yml` (`seo-engine/ci/check-sources-live.mjs`, lógica en `seo-engine/sources/live-check.mjs`).
+Solo lectura; el único job con salida a la red, y solo a `www.boe.es`, `www.aepd.es` y `www.insst.es` (el registro lo exige
+por esquema y se vuelve a exigir antes de salir). Es un control técnico: **no autoriza publicar**.
+
+- **Alcance:** artículos `approved` que el PR añade o modifica, y los que citan una fuente cuya entrada del registro es nueva
+  o cambia en el PR. Más de 40 citas en una ejecución **falla** (no se omite en silencio).
+- **Resultado por cita:** `confirmed` · `changed` (la fuente cambió desde el candado) · `contradicted` (cita/candado/registro
+  incoherentes) · `unreachable` (inconcluso tras los reintentos) · `unchecked` (sin candado, fuente desconocida, cita inválida).
+- **Modo estricto (por defecto y fijado en el workflow):** todo lo que no sea `confirmed` bloquea. El BOE inconcluso bloquea
+  siempre y **nunca** es excepcionable; AEPD/INSST inconclusos bloquean y se marcan `excepcionable` solo como dato para una
+  futura excepción firmada (F2.3c, no implementada). `LIVE_MODE=informative` existe para uso local: no falla, pero avisa
+  «NO verificado» y jamás muestra `confirmed`.
+- **Reintentos:** solo para lo transitorio (red, timeout, 5xx, 429/403, soft-block). Espera exponencial con jitter y tope,
+  1–5 intentos (3 por defecto). Un resultado definitivo (cita no encontrada, derogada, registro modificado…) no se repite.
+  Un error inesperado se trata como `unreachable`.
+- **Web (AEPD/INSST):** `vigencia_no_acreditable` y demás motivos permanentes ya están en el candado y no cuentan como cambio;
+  solo cuentan los motivos nuevos y `fuente_modificada`.
+- **Pruebas:** `tests/sources-live.test.mjs` (10), `tests/ci-sources-live.test.mjs` (7, con `fetch` sustituido por un
+  registro de URLs); 11 mutaciones, todas detectadas.
+- **No validado todavía:** el comportamiento real desde los ejecutores de GitHub (bloqueos de AEPD/INSST, límites del BOE) y
+  la duración real del job. Depende de la prueba D5 y de una PR de prueba, ambas sin autorizar.
