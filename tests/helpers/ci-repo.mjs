@@ -40,11 +40,11 @@ export function makeRepo(prefix = "lp-ci-") {
 }
 
 // Ejecuta un script de confianza de ESTE repositorio contra el repositorio temporal (cwd neutro, entorno mínimo).
-export function runTrusted(script, { repo, base, head, author = "otra-persona", branch = "feat/x", env = {}, summary, cwd } = {}) {
+export function runTrusted(script, { repo, base, head, author = "otra-persona", branch = "feat/x", env = {}, summary, cwd, trustedRoot = ROOT } = {}) {
   const neutral = cwd ?? mkdtempSync(join(tmpdir(), "lp-cwd-"));
   const vars = { PATH: process.env.PATH, REPO_DIR: repo.dir, BASE_SHA: base, HEAD_SHA: head, PR_AUTHOR: author, PR_BRANCH: branch, ...(summary ? { GITHUB_STEP_SUMMARY: summary } : {}), ...env };
   for (const key of Object.keys(vars)) if (vars[key] === undefined) delete vars[key];
-  const result = spawnSync("node", [join(ROOT, "seo-engine/ci", script)], { cwd: neutral, env: vars, encoding: "utf8", timeout: 60_000 });
+  const result = spawnSync("node", [join(trustedRoot, "seo-engine/ci", script)], { cwd: neutral, env: vars, encoding: "utf8", timeout: 60_000 });
   rmSync(neutral, { recursive: true, force: true });
   return result;
 }

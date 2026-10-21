@@ -102,4 +102,5 @@ jobs:
           FETCH_PR: "1"
           LIVE_MODE: strict
           LIVE_ATTEMPTS: "3"
+          BLOG_APPROVER_FINGERPRINT: ${{ vars.BLOG_APPROVER_FINGERPRINT }}   # variable pública (huella); ancla de las excepciones firmadas
         run: node seo-engine/ci/check-sources-live.mjs

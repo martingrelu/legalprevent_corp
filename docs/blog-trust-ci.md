@@ -88,3 +88,47 @@ por esquema y se vuelve a exigir antes de salir). Es un control técnico: **no a
   registro de URLs); 11 mutaciones, todas detectadas.
 - **No validado todavía:** el comportamiento real desde los ejecutores de GitHub (bloqueos de AEPD/INSST, límites del BOE) y
   la duración real del job. Depende de la prueba D5 y de una PR de prueba, ambas sin autorizar.
+
+## F2.3c — Excepciones firmadas para AEPD/INSST inaccesibles
+
+Cuando una fuente de la AEPD o del INSST no responde (bloqueo, caída), `sources-live` bloquea en modo estricto. El responsable
+puede **firmar una excepción** temporal. Es un acto distinto de aprobar el artículo y no verifica la fuente.
+
+- **Estado propio: `REVISION_EXCEPCIONAL`** («revisión excepcional documentada»). Nunca `verified` ni `confirmed`; en el log sale
+  como aviso («NO verificada») con su caducidad. No aprueba el artículo ni publica nada ni modifica artículos aprobados.
+- **Solo transforma `unreachable`.** `changed`, `contradicted` y `unchecked` siguen bloqueando.
+- **BOE: nunca.** Ni la herramienta, ni el formato del registro, ni la evaluación, ni `sources-live` lo permiten.
+- **Sin evidencias de fallo:** cualquier fallo offline de la cita (cita editada tras el candado, registro modificado, candado
+  inconsistente, localizador incompatible…) deniega la excepción aunque esté bien firmada.
+- **Firma independiente:** espacio de nombres `legalprevent-source-exception`, distinto del de las aprobaciones
+  (`legalprevent-blog-approval`): una firma de aprobación no vale como excepción ni al revés. Misma clave y misma huella fijada
+  (variable `BLOG_APPROVER_FINGERPRINT`); `allowed_signers` no cambia.
+- **Vinculación criptográfica** (todo dentro del texto firmado): slug, SHA-256 del contenido, cita, fuente, autoridad,
+  huella de la entrada del registro, huella del candado, fecha del candado y huella de la cita. Cambiar cualquiera invalida la
+  excepción (no se puede reutilizar para otra cita, versión, fuente o candado).
+- **Caducidad:** como máximo 7 días desde la firma **y** nunca después de que el candado cumpla 7 días (`verified_at` + 7).
+  Un candado de más de 7 días no admite excepción: hay que recalcularlo.
+- **Revocación:** un registro `revoke` posterior prevalece; ante empate de marca de tiempo, la revocación.
+- **Falla cerrado:** un registro ilegible, con campos de más o de menos, con nombre que no coincide con su contenido, mal firmado
+  o de otra identidad deniega toda excepción de esa cita (no se ignora).
+- **Dónde se firma:** `node seo-engine/except.mjs <slug> <id-de-cita> [--revoke]` en terminal interactiva propia (no en CI),
+  con confirmación de los 8 primeros caracteres de la vinculación y la contraseña de la clave. Escribe solo
+  `content/blog/exceptions/<slug>/<fecha>-<grant|revoke>-<hash8>.json`.
+- **En CI (`sources-live`):** los registros llegan del PR como **datos**; la clave sale de `seo-engine/allowed_signers` de la
+  **rama base** (código de confianza) y la huella de la variable de Actions. Un PR que traiga su propio `allowed_signers` o su
+  propia huella no cambia nada. Sin clave en la base o sin huella fijada, no se aplica ninguna excepción. Un PR generado por
+  el motor no puede añadir excepciones (la regla de separación solo le deja tocar su borrador).
+
+### Fallo de F2.3b corregido en esta fase
+
+`check-sources-live.mjs` decidía si ejecutarse comparando `import.meta.url` con `process.argv[1]`. Si la ruta se resolvía de
+forma distinta (p. ej. un enlace simbólico), el script **salía con 0 sin comprobar nada**. En el workflow no ocurría, pero era un
+éxito silencioso. Ahora se ejecuta siempre al cargarse, como los otros controles, y un test estático prohíbe esa guarda en
+`seo-engine/ci/`.
+
+### Pendiente y límites
+
+- No se ha firmado ninguna excepción real ni se ha probado en GitHub Actions.
+- Para que el CI aplique excepciones, `seo-engine/allowed_signers` tiene que estar en la rama base (hoy solo está en la rama de #29).
+- La política de qué hacer ante una indisponibilidad que supere 7 días es del responsable: hay que recalcular el candado.
+- Sin integrar en `approve.mjs` (F2.4) ni en la comprobación programada (F2.3d).
