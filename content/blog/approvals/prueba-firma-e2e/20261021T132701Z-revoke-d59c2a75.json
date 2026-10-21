@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "action": "revoke",
+  "slug": "prueba-firma-e2e",
+  "sha256": "d59c2a758cdd636bf114ce9e38d2f9fb4e6cabead731317a6380782c6065dd00",
+  "timestamp": "2026-10-21T13:27:01Z",
+  "identity": "martingrelu",
+  "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAghf0JBnQQcCyHzzYMKaq5I2DeUx\ngGrc8C1OyEpluCYH0AAAAabGVnYWxwcmV2ZW50LWJsb2ctYXBwcm92YWwAAAAAAAAABnNo\nYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA661Qtg56FF5/3LCk1b20zQCLr95Yjvc7aa\nJckRVew0sNEGrnPzfVrZ1pUZNIgs7J92ITW4zIEOeRZ0MiyZ30BA==\n-----END SSH SIGNATURE-----\n"
+}
