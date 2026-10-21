@@ -101,3 +101,46 @@ test("artículos tocados que no se pueden leer (enlace simbólico) o sin registr
   assert.equal(noRegistry.status, 1);
   assert.deepEqual(noRegistry.urls, []);
 });
+
+// Preload con las respuestas REALES recortadas del BOE. FAIL_FIRST=n hace que las n primeras peticiones devuelvan 503.
+const okPreload = join(dir, "fake-boe.mjs");
+const fixtureDir = new URL("./fixtures/boe/", import.meta.url).pathname;
+writeFileSync(okPreload, `import { appendFileSync, readFileSync } from "node:fs";
+let n = 0;
+const fx = (name) => readFileSync(${JSON.stringify(fixtureDir)} + name, "utf8");
+globalThis.fetch = async (url) => {
+  appendFileSync(process.env.FETCH_LOG, String(url) + "\\n");
+  if (++n <= Number(process.env.FAIL_FIRST ?? 0)) return new Response("error", { status: 503 });
+  if (String(url).endsWith("/metadatos")) return new Response(fx("metadatos-BOE-A-2018-16673.json"), { status: 200 });
+  if (String(url).endsWith("/texto/indice")) return new Response(fx("indice-BOE-A-2018-16673.json"), { status: 200 });
+  if (String(url).endsWith("/texto/bloque/a5")) return new Response(fx("bloque-BOE-A-2018-16673-a5.xml"), { status: 200 });
+  return new Response("", { status: 404 });
+};\n`);
+
+function runOk(env) {
+  const repo = makeRepo();
+  const base = repo.commit({ "README.md": "m\n" }, "base");
+  repo.branch("pr");
+  const head = repo.commit({ "content/blog/tema.md": article(), "content/sources/registry.json": registryText }, "pr");
+  const log = join(dir, `ok-${++seq}.log`);
+  const r = runTrusted("check-sources-live.mjs", { repo, base, head, author: "martingrelu", branch: "feat/x", env: { NODE_OPTIONS: `--import=${okPreload}`, FETCH_LOG: log, LIVE_ATTEMPTS: "3", ...env } });
+  repo.cleanup();
+  return r;
+}
+
+test("camino feliz: respuestas coherentes del BOE = exit 0 y la cita aparece como CONFIRMED", () => {
+  const r = runOk({});
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /CONFIRMED/);
+  assert.match(r.stdout, /sources-live: CORRECTO/);
+});
+
+test("un 503 transitorio se supera con reintentos (exit 0, 2 intentos); si no se supera, exit 1", () => {
+  const recovered = runOk({ FAIL_FIRST: "1" });
+  assert.equal(recovered.status, 0, recovered.stdout + recovered.stderr);
+  assert.match(recovered.stdout, /\[2 intentos\]|CONFIRMED/);
+  const exhausted = runOk({ FAIL_FIRST: "99", LIVE_ATTEMPTS: "2" });
+  assert.equal(exhausted.status, 1);
+  assert.match(exhausted.stdout, /UNREACHABLE/);
+  assert.doesNotMatch(exhausted.stdout, /sources-live: CORRECTO/);
+});
