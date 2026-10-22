@@ -156,6 +156,51 @@
         "document": "https://www.insst.es/documents/94886/789467/Gu%C3%ADa+t%C3%A9cnica+para+la+Simplificaci%C3%B3n+documental.pdf/8a94430e-7fd5-4ee4-9928-174a45255eb4?t=1605800363817"
       },
       "added_at": "2026-10-21"
+    },
+    {
+      "id": "boe-lo-3-2007",
+      "authority": "BOE",
+      "kind": "texto_consolidado",
+      "binding": "informativo",
+      "title": "Ley Orgánica 3/2007, de 22 de marzo, para la igualdad efectiva de mujeres y hombres.",
+      "official_ref": {
+        "boe_id": "BOE-A-2007-6115",
+        "numero_oficial": "3/2007"
+      },
+      "urls": {
+        "canonical": "https://www.boe.es/buscar/act.php?id=BOE-A-2007-6115"
+      },
+      "added_at": "2026-10-22"
+    },
+    {
+      "id": "boe-rd-901-2020",
+      "authority": "BOE",
+      "kind": "texto_consolidado",
+      "binding": "informativo",
+      "title": "Real Decreto 901/2020, de 13 de octubre, por el que se regulan los planes de igualdad y su registro y se modifica el Real Decreto 713/2010, de 28 de mayo, sobre registro y depósito de convenios y acuerdos colectivos de trabajo.",
+      "official_ref": {
+        "boe_id": "BOE-A-2020-12214",
+        "numero_oficial": "901/2020"
+      },
+      "urls": {
+        "canonical": "https://www.boe.es/buscar/act.php?id=BOE-A-2020-12214"
+      },
+      "added_at": "2026-10-22"
+    },
+    {
+      "id": "boe-rd-902-2020",
+      "authority": "BOE",
+      "kind": "texto_consolidado",
+      "binding": "informativo",
+      "title": "Real Decreto 902/2020, de 13 de octubre, de igualdad retributiva entre mujeres y hombres.",
+      "official_ref": {
+        "boe_id": "BOE-A-2020-12215",
+        "numero_oficial": "902/2020"
+      },
+      "urls": {
+        "canonical": "https://www.boe.es/buscar/act.php?id=BOE-A-2020-12215"
+      },
+      "added_at": "2026-10-22"
     }
   ]
 }

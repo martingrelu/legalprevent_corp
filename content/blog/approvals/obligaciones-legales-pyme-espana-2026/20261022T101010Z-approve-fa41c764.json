@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "action": "approve",
+  "slug": "obligaciones-legales-pyme-espana-2026",
+  "sha256": "fa41c7645b47afe3e8f5ae8ac8ef5f345cf08ddeaaf04aa13da77712a91d19e9",
+  "timestamp": "2026-10-22T10:10:10Z",
+  "identity": "martingrelu",
+  "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAghf0JBnQQcCyHzzYMKaq5I2DeUx\ngGrc8C1OyEpluCYH0AAAAabGVnYWxwcmV2ZW50LWJsb2ctYXBwcm92YWwAAAAAAAAABnNo\nYTUxMgAAAFMAAAALc3NoLWVkMjU1MTkAAABA9SBAOdvZrQgFhFPvjFFnBsD53dc7+ckwPm\nfVTzk71i/hPeKyJEhD1hOF3Jze7EpA76mAzOG/sbyGMXs1GWX2Aw==\n-----END SSH SIGNATURE-----\n"
+}

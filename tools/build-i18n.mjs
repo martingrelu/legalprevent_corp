@@ -71,7 +71,7 @@ for (const file of pages) {
 // scoring and Supabase payloads are never passed through the translator.
 outputs.set('i18n/en-runtime.js', `(() => {\nconst dictionary = ${JSON.stringify(dictionary)};\n${read('tools/i18n-runtime-source.js')}\n})();\n`);
 
-const indexed = ['/', '/partner/', '/diagnostico/', '/aviso-legal/', '/politica-privacidad/', '/politica-cookies/', '/terminos-condiciones/', '/documentacion-legal/'];
+const indexed = ['/', '/partner/', '/diagnostico/', '/aviso-legal/', '/politica-privacidad/', '/politica-cookies/', '/terminos-condiciones/', '/documentacion-legal/', '/blog/', '/blog/obligaciones-legales-pyme-espana-2026/'];
 const sitemapUrls = [...indexed, ...[...routes.entries()].filter(([route])=>route!=='/gracias/').map(([,route])=>route)];
 outputs.set('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${sitemapUrls.map(route=>{
   const spanish = route.startsWith('/en/') ? [...routes.entries()].find(([,en])=>en===route)[0] : route;
