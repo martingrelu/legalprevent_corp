@@ -1,0 +1,106 @@
+# Controles de CONFIANZA del blog (F2.3a): `separation` y `citations`.
+#
+# Se disparan con pull_request_target a propósito: así GitHub usa el workflow y los scripts de la rama BASE del PR, y un PR
+# (generado o comprometido) no puede modificar ni desactivar sus propios controles. A cambio, este fichero cumple estas
+# reglas, comprobadas por tests/ci-trust-workflow.test.mjs:
+#   - se hace checkout SOLO de la rama base (por SHA), nunca del código del PR: el contenido del PR se lee como OBJETOS de
+#     git (seo-engine/ci/safe-git.mjs), sin extraerlo ni ejecutarlo;
+#   - no se ejecuta nada que venga del PR: ni scripts, ni dependencias, ni configuración, ni acciones propias;
+#   - permisos de solo lectura, sin secretos y sin el token de la API;
+#   - ningún dato del PR (rama, título, autor, rutas) se interpola en un `run`: solo llega como variable de entorno y los
+#     scripts lo validan y lo sanean antes de escribirlo en el log.
+name: Blog Trust (controles desde la rama base)
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}            # sin permisos por defecto; cada job pide solo lo suyo
+
+concurrency:
+  group: blog-trust-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  separation:
+    name: separation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read       # solo leer el repositorio; sin escritura, sin token de la API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Comprobar versión de Node
+        run: |
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+
+      - name: Separación entre contenido generado y contenido humano
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          FETCH_PR: "1"
+        run: node seo-engine/ci/check-separation.mjs
+
+  citations:
+    name: citations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read       # solo leer el repositorio; sin escritura, sin token de la API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Comprobar versión de Node
+        run: |
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+
+      - name: Citas de los artículos aprobados (sin red; el PR solo se lee como datos)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FETCH_PR: "1"
+        run: node seo-engine/ci/check-citations.mjs
+
+  sources-live:
+    name: sources-live
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read       # solo leer el repositorio; sin escritura, sin token de la API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Comprobar versión de Node
+        run: |
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+
+      - name: Citas en vivo (solo lectura de www.boe.es, www.aepd.es y www.insst.es; modo estricto)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FETCH_PR: "1"
+          LIVE_MODE: strict
+          LIVE_ATTEMPTS: "3"
+          BLOG_APPROVER_FINGERPRINT: ${{ vars.BLOG_APPROVER_FINGERPRINT }}   # variable pública (huella); ancla de las excepciones firmadas
+        run: node seo-engine/ci/check-sources-live.mjs

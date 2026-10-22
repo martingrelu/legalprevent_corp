@@ -1,0 +1,57 @@
+# CI del blog: tests y verificación de las aprobaciones jurídicas (firma SSH desprendida).
+# Solo lectura: no despliega, no publica y no usa ningún secreto ni token de la API de GitHub.
+# La verificación es offline (ssh-keygen). Solo lee la variable de Actions BLOG_APPROVER_FINGERPRINT,
+# que es pública (una huella de clave pública) y se define fuera del repositorio.
+# El despliegue sigue siendo exclusivamente pages.yml (allowlist).
+name: Blog CI (tests y aprobaciones)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions: {}            # sin permisos por defecto; cada job pide solo lo suyo
+
+concurrency:
+  group: blog-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read       # solo leer el repositorio
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Comprobar versión de Node
+        run: |
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+
+      - name: Tests
+        run: node --test tests/*.mjs
+
+      - name: La salida de blog/ coincide con las fuentes aprobadas
+        run: node seo-engine/blog-render.mjs --check
+
+  approval:
+    name: approval
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read        # solo leer el repositorio; sin API de GitHub ni escritura de ningún tipo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verificar aprobaciones jurídicas (firma SSH)
+        env:
+          BLOG_APPROVER_FINGERPRINT: ${{ vars.BLOG_APPROVER_FINGERPRINT }}
+        run: node seo-engine/verify-approval.mjs

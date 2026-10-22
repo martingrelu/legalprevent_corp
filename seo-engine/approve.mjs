@@ -1,0 +1,149 @@
+// Herramienta LOCAL del responsable jurídico: firma la autorización de publicación (o su revocación).
+// Debe ejecutarse en una terminal interactiva propia: pide confirmar el hash y la contraseña de la clave.
+// No se ejecuta en CI ni sin terminal, para que un proceso automático no pueda firmar por su cuenta.
+//
+// Uso:
+//   node seo-engine/approve.mjs <slug> [--key ~/.ssh/legalprevent_approval]
+//   node seo-engine/approve.mjs <slug> --revoke [--sha256 <hash>] [--key …]
+//
+// Antes de firmar, el artículo debe tener review_status "approved" y approved_at = hoy (UTC) y superar la puerta de
+// verificación de citas (approval-gate.mjs: offline y en vivo, estricto). La revocación no pasa por la puerta.
+// Si alguna cita queda en REVISION_EXCEPCIONAL (excepción firmada vigente) hay que confirmarlo expresamente.
+// Escribe content/blog/approvals/<slug>/<fecha>-<acción>-<hash8>.json; después hay que commitearlo.
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
+import { fileURLToPath } from "node:url";
+import { approvalGate } from "./approval-gate.mjs";
+import { contentHash, parseSource } from "./blog-render.mjs";
+import { formatLiveItem } from "./sources/live-check.mjs";
+import {
+  allowedSignersFingerprint,
+  buildRecord,
+  loadRecords,
+  nowTimestamp,
+  recordFileName,
+  signStatement,
+  statementFor,
+  verifyRecordSignature,
+} from "./approval-signature.mjs";
+
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+// El orden entre aprobaciones y revocaciones se decide por la marca de tiempo FIRMADA, que declara el reloj
+// de este equipo. Para que el orden no pueda quedar ambiguo (reloj atrasado, dos firmas en el mismo segundo),
+// la nueva marca debe ser ESTRICTAMENTE posterior a la del último registro del artículo; si no, no se firma nada.
+// Se comprueba antes de pedir confirmación o contraseña.
+export function assertTimestampAfterLastRecord(root, slug, timestamp) {
+  let last;
+  for (const { file, record } of loadRecords(resolve(root, "content/blog/approvals"), slug)) {
+    if (!record || !TIMESTAMP.test(record.timestamp ?? "")) {
+      throw new Error(`el registro existente ${file} no es legible o no tiene una marca de tiempo válida; resuélvelo antes de firmar`);
+    }
+    if (!last || record.timestamp > last.timestamp) last = { file, timestamp: record.timestamp };
+  }
+  if (last && timestamp <= last.timestamp) {
+    throw new Error(
+      `la hora de este equipo (${timestamp}) no es posterior a la del último registro (${last.timestamp}, ${last.file}); ` +
+        "no se firma para que el orden entre aprobación y revocación no sea ambiguo. Revisa el reloj o espera unos segundos"
+    );
+  }
+}
+
+// Crea y comprueba el registro. `sign` se inyecta para poder probarlo con claves efímeras.
+export function createRecord({ root, slug, action, sha256, identity, sign, now = new Date() }) {
+  const timestamp = nowTimestamp(now);
+  assertTimestampAfterLastRecord(root, slug, timestamp); // antes de firmar: no se pide la contraseña si va a fallar
+  const statement = statementFor({ action, slug, sha256, timestamp });
+  const record = buildRecord({ action, slug, sha256, timestamp, identity, signature: sign(statement) });
+  const allowedSigners = readFileSync(resolve(root, "seo-engine/allowed_signers"), "utf8");
+  const found = allowedSignersFingerprint(allowedSigners, identity);
+  if (!found.ok) throw new Error(found.reason);
+  const verified = verifyRecordSignature(record, { allowedSigners, identity, fingerprint: found.fingerprint });
+  if (!verified.ok) throw new Error(`la firma generada no valida contra seo-engine/allowed_signers: ${verified.reason}`);
+  const path = resolve(root, "content/blog/approvals", slug, recordFileName(record));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" });
+  return { path, record };
+}
+
+export function assertInteractive({ isTTY = process.stdin.isTTY && process.stdout.isTTY, env = process.env } = {}) {
+  if (env.CI || env.GITHUB_ACTIONS) throw new Error("approve.mjs no se puede ejecutar en CI");
+  if (!isTTY) throw new Error("approve.mjs necesita una terminal interactiva (la firma debe ser un acto deliberado del responsable)");
+}
+
+export const EXCEPTIONAL_PHRASE = "EXCEPCIONAL";
+
+// Comprobaciones previas de una APROBACIÓN (no de una revocación): estado, fecha, hash y puerta de citas. No escribe nada.
+export async function prepareApproval({ root, slug, identity, sha256, now = new Date(), gate = approvalGate, gateOptions = {} }) {
+  const { meta, body } = parseSource(readFileSync(resolve(root, "content/blog", `${slug}.md`), "utf8"), `${slug}.md`);
+  const actual = contentHash(meta, body);
+  if (sha256 !== undefined && sha256 !== actual) throw new Error("--sha256 solo se admite para revocar: una aprobación se firma siempre sobre el contenido actual");
+  if (meta.review_status !== "approved") throw new Error('el artículo debe tener review_status "approved" antes de firmar');
+  const today = nowTimestamp(now).slice(0, 10);
+  if (meta.approved_at !== today) throw new Error(`approved_at debe ser la fecha de hoy (${today}) y es ${meta.approved_at}`);
+  const result = await gate({ root, meta, body, identity, now, ...gateOptions });
+  if (!result.ok) throw new Error(`no se firma: las citas no superan la verificación (${result.stage}):\n  - ${result.problems.join("\n  - ")}`);
+  return { meta, body, sha256: actual, gate: result };
+}
+
+// Si hay citas en REVISION_EXCEPCIONAL, la firma exige escribir expresamente la palabra EXCEPCIONAL.
+export function assertExceptionalConfirmed(gate, typed) {
+  if (gate.exceptional.length && typed !== EXCEPTIONAL_PHRASE) throw new Error(`hay ${gate.exceptional.length} cita(s) en REVISION_EXCEPCIONAL (fuente sin verificar): hay que confirmarlo escribiendo ${EXCEPTIONAL_PHRASE}`);
+}
+
+// Flujo completo sin interacción (lo usan las pruebas; la CLI hace lo mismo con confirmaciones por terminal).
+export async function approveArticle({ root, slug, identity, sign, exceptionalTyped, now = new Date(), gate, gateOptions }) {
+  const prepared = await prepareApproval({ root, slug, identity, now, gate, gateOptions });
+  assertExceptionalConfirmed(prepared.gate, exceptionalTyped);
+  return { ...createRecord({ root, slug, action: "approve", sha256: prepared.sha256, identity, sign, now }), gate: prepared.gate };
+}
+
+// Se compara con la ruta REAL: con un enlace simbólico la comparación fallaba y el script salía con 0 sin hacer nada.
+const isMain = Boolean(process.argv[1]) && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+if (isMain) {
+  try {
+    assertInteractive();
+    const args = process.argv.slice(2);
+    const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+    const slug = args[0]?.startsWith("--") ? undefined : args[0];
+    if (!slug) throw new Error("uso: node seo-engine/approve.mjs <slug> [--revoke] [--sha256 <hash>] [--key <ruta>]");
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+    const { reviewer_github: identity, reviewer_name: name } = JSON.parse(readFileSync(resolve(root, "seo-engine/approvers.json"), "utf8"));
+    const keyPath = resolve(option("--key") ?? `${homedir()}/.ssh/legalprevent_approval`);
+    const action = args.includes("--revoke") ? "revoke" : "approve";
+
+    let meta;
+    let body;
+    let sha256;
+    let gate = null;
+    if (action === "approve") {
+      ({ meta, body, sha256, gate } = await prepareApproval({ root, slug, identity, sha256: option("--sha256") }));
+      console.log("Verificación de citas superada (offline y en vivo, estricta):");
+      for (const item of gate.live.items) console.log(`  ${formatLiveItem(item)}`);
+    } else {
+      ({ meta, body } = parseSource(readFileSync(resolve(root, "content/blog", `${slug}.md`), "utf8"), `${slug}.md`));
+      sha256 = option("--sha256") ?? contentHash(meta, body);
+      if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("--sha256 debe ser un SHA-256 en hexadecimal");
+    }
+
+    assertTimestampAfterLastRecord(root, slug, nowTimestamp()); // falla pronto, antes de pedir nada
+    console.log(`\n${action === "approve" ? "AUTORIZACIÓN DE PUBLICACIÓN" : "REVOCACIÓN"} — ${name} (${identity})`);
+    console.log(`  Título:  ${meta.title}\n  Slug:    ${slug}\n  SHA-256: ${sha256}\n  Citas:   ${(meta.citations ?? []).length}`);
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    if (gate?.exceptional.length) {
+      console.log(`\n  ATENCIÓN: ${gate.exceptional.length} cita(s) en REVISION_EXCEPCIONAL: la fuente NO se ha verificado; solo hay una excepción firmada y temporal.`);
+      assertExceptionalConfirmed(gate, (await rl.question(`Escribe ${EXCEPTIONAL_PHRASE} para firmar igualmente: `)).trim());
+    }
+    const typed = (await rl.question(`Escribe los 8 primeros caracteres del hash (${sha256.slice(0, 8)}) para confirmar: `)).trim();
+    rl.close();
+    if (typed !== sha256.slice(0, 8)) throw new Error("confirmación incorrecta; no se ha firmado nada");
+
+    const { path } = createRecord({ root, slug, action, sha256, identity, sign: (statement) => signStatement(statement, keyPath, { interactive: true }) });
+    console.log(`\nRegistro firmado y verificado: ${path}\nAhora commitéalo (git add content/blog/approvals/${slug}).`);
+  } catch (error) {
+    console.error(`Error: ${error.message}`);
+    process.exit(1);
+  }
+}

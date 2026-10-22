@@ -1,0 +1,40 @@
+# Comprobación PROGRAMADA de deriva de las citas de los artículos publicados (F2.3d). SOLO LECTURA:
+#   - no modifica ni despublica nada, no abre issues ni PR, no escribe en el repositorio (contents: read, sin secretos);
+#   - deja constancia en el resumen del job y avisa fallando el job (revisión jurídica necesaria / inconcluso);
+#   - no aplica excepciones firmadas: una fuente que deja de responder queda INCONCLUSO, nunca satisfactorio.
+# Los workflows con `schedule` solo se ejecutan desde la rama por defecto: este fichero no hace nada hasta estar en `main`.
+name: Sources drift (comprobación programada, solo lectura)
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"      # lunes 05:23 UTC
+  workflow_dispatch: {}
+
+permissions: {}              # sin permisos por defecto; el job pide solo lo suyo
+
+concurrency:
+  group: sources-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read         # solo leer el repositorio; sin escritura, sin token de la API
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Comprobar versión de Node
+        run: |
+          node --version
+          node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 20 ? 0 : 1)'
+
+      - name: Deriva de las citas publicadas (solo lectura de www.boe.es, www.aepd.es y www.insst.es)
+        env:
+          BLOG_APPROVER_FINGERPRINT: ${{ vars.BLOG_APPROVER_FINGERPRINT }}   # variable pública (huella fijada fuera del repositorio)
+          LIVE_ATTEMPTS: "3"
+        run: node seo-engine/ci/check-drift.mjs
