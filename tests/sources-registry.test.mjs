@@ -22,7 +22,7 @@ import {
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const registry = JSON.parse(read("content/sources/registry.json"));
 const clone = (value) => structuredClone(value);
-const TODAY = "2026-10-21";
+const TODAY = "2026-10-22";
 const boe = () => clone(registry.sources.find((entry) => entry.id === "boe-lo-3-2018"));
 const guia = () => ({
   id: "aepd-guia-ejemplo",

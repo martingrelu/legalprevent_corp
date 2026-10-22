@@ -20,7 +20,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const BASE = "https://legalprevent.com";
-export const AUTHOR = "Equipo Jurídico de LegalPrevent";
+export const AUTHOR = "Equipo editorial de LegalPrevent";
 export const REVIEWER = { name: "Luis Martín Grecco", title: "Abogado" };
 const STATUSES = ["draft", "in_review", "approved"];
 const SOURCE_STATUSES = { vigente: "Vigente", proyecto: "Proyecto (no vigente)", derogada: "Derogada" };

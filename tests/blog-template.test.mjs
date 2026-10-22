@@ -61,7 +61,7 @@ test("canonical propio, og:url y breadcrumbs coherentes", () => {
 
 test("el artículo aprobado muestra autoría, fechas y responsable de revisión", () => {
   const html = renderArticle(fixture);
-  assert.match(html, /Equipo Jurídico de LegalPrevent/);
+  assert.match(html, /Equipo editorial de LegalPrevent/);
   assert.match(html, /<time datetime="2026-10-01">01\/10\/2026<\/time>/);
   assert.match(html, /<time datetime="2026-10-15">15\/10\/2026<\/time>/);
   assert.match(html, /Luis Martín Grecco, abogado/);
@@ -79,7 +79,7 @@ test("las fuentes muestran su estado normativo y el contenido se escapa", () => 
 test("el JSON-LD es válido y contiene Article, WebPage y BreadcrumbList", () => {
   const json = JSON.parse(renderArticle(fixture).match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1]);
   assert.deepEqual(json["@graph"].map((n) => n["@type"]), ["Article", "WebPage", "BreadcrumbList"]);
-  assert.equal(json["@graph"][0].author.name, "Equipo Jurídico de LegalPrevent");
+  assert.equal(json["@graph"][0].author.name, "Equipo editorial de LegalPrevent");
 });
 
 test("la salida es determinista", () => {
@@ -285,7 +285,7 @@ test("la allowlist de Pages nunca incluye el fixture, tests, seo-engine ni conte
 });
 
 test("el sitemap y producción no cambian: nada del blog publicado", () => {
-  assert.doesNotMatch(read("sitemap.xml"), /\/blog\/|articulo-de-prueba/);
-  assert.doesNotMatch(read("tools/build-i18n.mjs"), /blog/);
+  assert.doesNotMatch(read("sitemap.xml"), /articulo-de-prueba/);
+  assert.doesNotMatch(read("tools/build-i18n.mjs"), /articulo-de-prueba/);
   assert.doesNotMatch(read(".github/workflows/pages.yml"), /blog|seo-engine|content\//);
 });

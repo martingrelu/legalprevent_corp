@@ -46,3 +46,7 @@ en/gracias/index.html
 assets/og/og-en-v1.jpg
 i18n/en-runtime.js
 language.js
+
+# Blog: primer artículo (aprobado y firmado) y su índice
+blog/index.html
+blog/obligaciones-legales-pyme-espana-2026/index.html

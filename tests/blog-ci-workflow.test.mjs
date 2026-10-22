@@ -69,5 +69,7 @@ test("producción no cambia: pages.yml sigue publicando solo la allowlist y esta
   assert.match(pages, /pages-allowlist\.txt/);
   assert.doesNotMatch(pages, /blog|seo-engine|content\//);
   const allowlist = read(".github/pages-allowlist.txt");
-  assert.doesNotMatch(allowlist, /blog|seo-engine|content\/|docs\/blog-approval|workflows\/blog-ci|approvals|allowed_signers/);
+  assert.doesNotMatch(allowlist, /seo-engine|content\/|docs\/blog-approval|workflows\/blog-ci|approvals|allowed_signers/);
+  const blogLines = allowlist.split("\n").filter((l) => /blog/.test(l) && !l.startsWith("#"));
+  assert.ok(blogLines.every((l) => l.startsWith("blog/")), "el blog solo entra como rutas blog/ generadas");
 });
