@@ -10,7 +10,7 @@ Rama: `lp-web-2026/entrega-1`. Pendiente de aprobación para cualquier PR, merge
 - Business deja de anunciar soporte profesional ampliado. Su alcance se remite a consulta, porque la base comercial lo tiene pendiente de definición. La validación jurídica se presenta como servicio adicional de contratación específica.
 - Diagnóstico gratuito como CTA principal de Inicio y demo como alternativa. Titulares más compactos. Partner prioriza la gestión de cartera, visibiliza las condiciones temporales y enlaza a las condiciones completas.
 - Las solicitudes de demo se crean como «Nuevo», prioridad «Media», sin plan recomendado y con riesgo nulo. Se mantiene `demo_requested` como origen. El CRM reconoce estas solicitudes sin transformarlas en citas.
-- El CRM distingue riesgo nulo de riesgo cero, muestra «Sin evaluar» y no asigna 50 por defecto a nuevos contactos o importaciones. Guardar «Demo agendada» exige una fecha y hora válida introducida por el operador; la fecha no verifica por sí sola la aceptación del invitado.
+- El CRM distingue riesgo nulo de riesgo cero, muestra «Sin evaluar» y no asigna 50 por defecto a nuevos contactos o importaciones. Guardar «Demo agendada», también desde el selector rápido o arrastrando una tarjeta, exige una fecha y hora válida introducida por el operador; la fecha no verifica por sí sola la aceptación del invitado.
 - Se mantienen los nombres de planes históricos del CRM para no modificar registros previos. No se corrigen datos históricos ni se ejecutan migraciones.
 - Se regeneran las páginas EN y el diccionario de ejecución con el generador existente; se renuevan las versiones de caché de los recursos afectados.
 
@@ -34,13 +34,13 @@ Las cifras que permanecen en paneles están etiquetadas como ficticias y no se p
 
 ## Verificación focalizada
 
-120 pruebas aprobadas, cero fallos, cancelaciones u omisiones. Comando reproducible:
+121 pruebas aprobadas, cero fallos, cancelaciones u omisiones. Comando reproducible:
 
 ```sh
 node --test tests/lp-web-delivery.test.mjs tests/supabase-bridge.test.mjs tests/no-local-lead-storage.test.mjs tests/crm-store.test.mjs tests/i18n.test.mjs tests/seo-meta.test.mjs tests/agent-widget.test.ts tests/sales-agent-public.test.ts tests/sales-agent.test.ts tests/sales-agent-scope.test.ts tests/send-lead-email.test.ts
 ```
 
-Las cinco pruebas nuevas ejercitan el manejador real de envío con transporte sustituido, errores y límite de solicitudes, la semántica CRM y la retirada de contenido no acreditado. Las pruebas existentes cubren consentimientos, transporte del formulario, avisos por identificador, fallo de notificación, separación público/privado de Escudito, alcance comercial, enlaces y SEO/i18n. Todo el transporte de estas pruebas está simulado: no se consulta ni modifica la base real ni se envían emails.
+Las seis pruebas nuevas ejercitan el manejador real de envío con transporte sustituido, errores y límite de solicitudes, la semántica CRM y la retirada de contenido no acreditado. Las pruebas existentes cubren consentimientos, transporte del formulario, avisos por identificador, fallo de notificación, separación público/privado de Escudito, alcance comercial, enlaces y SEO/i18n. Todo el transporte de estas pruebas está simulado: no se consulta ni modifica la base real ni se envían emails.
 
 `git diff --check` correcto. Comprobados enlaces internos y recursos de Inicio y Partner ES/EN, existencia de los 41 archivos publicables, condiciones Partner y destinos de contratación idénticos a la base. Sin dependencias ni páginas nuevas. Blog, branding oficial, sitemap, allowlist, workflows, secretos, configuración y backend sin cambios.
 
