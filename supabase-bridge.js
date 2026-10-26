@@ -251,7 +251,7 @@
     employees: Number(lead.employees || 0) || null,
     status: lead.status || "Nuevo",
     priority: lead.priority || "Media",
-    risk_score: Number(lead.riskScore || 0),
+    risk_score: lead.riskScore == null || lead.riskScore === "" ? null : Number(lead.riskScore),
     recommended_plan: lead.recommendedPlan || "",
     lead_type: lead.leadType || null,
     zone: lead.zone || null,
