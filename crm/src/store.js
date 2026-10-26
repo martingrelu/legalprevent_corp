@@ -398,8 +398,8 @@ export function leadFromSupabaseRow(row, { existingId = "", defaultOwnerId = "",
     leadType: row.lead_type || "",
     zone: row.zone || "",
     demoAt: row.demo_at || "",
-    // Demostración pedida por el visitante tras el diagnóstico (mismo lead).
-    demoRequestedAt: row.demo_requested_at || "",
+    // Solicitud de demo desde el diagnóstico o la portada, sin confirmar cita.
+    demoRequestedAt: row.demo_requested_at || (row.source === "demo_requested" ? row.created_at || "" : ""),
     lostReason: row.lost_reason || "",
     // La columna manda; payload.nextActionAt es el dato antiguo. Sin fecha = "Sin acción".
     nextActionAt: row.next_action_at || crmPayload.nextActionAt || "",
@@ -409,7 +409,7 @@ export function leadFromSupabaseRow(row, { existingId = "", defaultOwnerId = "",
     recommendedPlan: row.recommended_plan || "",
     estimatedMonthlyRevenue: Number(crmPayload.estimatedMonthlyRevenue || 0),
     revenueConfirmed: Boolean(crmPayload.revenueConfirmed),
-    riskScore: row.risk_score || 0,
+    riskScore: row.risk_score ?? null,
     convertedClientId: "",
     // Consentimiento (solo lectura en el CRM: lo registra el servidor). Si la
     // base aún no tiene estas columnas, no se muestran en la ficha.
@@ -481,7 +481,7 @@ export function upsertLead(state, formData, id = "") {
     recommendedPlan: sanitizeText(formData.get("recommendedPlan")),
     estimatedMonthlyRevenue: Number(formData.get("estimatedMonthlyRevenue") || 0),
     revenueConfirmed: Number(formData.get("estimatedMonthlyRevenue") || 0) > 0,
-    riskScore: Number(formData.get("riskScore") || 0),
+    riskScore: formData.get("riskScore") === "" || formData.get("riskScore") == null ? null : Number(formData.get("riskScore")),
   };
 
   // Campos de embudo: si el formulario no los trae (p. ej. importación CSV)
@@ -526,11 +526,12 @@ export function validateLead(lead) {
   if (!lead.companyName || !lead.contactName) throw new Error("Empresa y contacto son obligatorios.");
   if (!isValidEmail(lead.email)) throw new Error("El email del lead no tiene un formato valido.");
   if (!LEAD_STATUSES.includes(lead.status)) throw new Error("Estado de lead no valido.");
+  if (lead.status === "Demo agendada" && (!lead.demoAt || !Number.isFinite(Date.parse(lead.demoAt)))) throw new Error("Confirma la fecha y hora de la cita antes de marcar Demo agendada.");
   if (!PRIORITIES.includes(lead.priority)) throw new Error("Prioridad no valida.");
   if (lead.recommendedPlan && !PLANS.includes(lead.recommendedPlan)) throw new Error("Plan recomendado no valido.");
   if (lead.leadType && !LEAD_TYPES.some(([value]) => value === lead.leadType)) throw new Error("Tipo de lead no valido.");
   if (lead.lostReason && !LOST_REASONS.some(([value]) => value === lead.lostReason)) throw new Error("Motivo de perdida no valido.");
-  if (lead.riskScore < 0 || lead.riskScore > 100) throw new Error("El riesgo debe estar entre 0 y 100.");
+  if (lead.riskScore != null && (!Number.isFinite(lead.riskScore) || lead.riskScore < 0 || lead.riskScore > 100)) throw new Error("El riesgo debe estar entre 0 y 100.");
 }
 
 export function upsertTask(state, formData, id = "") {
