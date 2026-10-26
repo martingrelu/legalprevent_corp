@@ -50,3 +50,21 @@ language.js
 # Blog: primer artículo (aprobado y firmado) y su índice
 blog/index.html
 blog/obligaciones-legales-pyme-espana-2026/index.html
+
+# LP-WEB-2026 Entrega 2 · Public commercial pages only
+intelligence/index.html
+academy/index.html
+escudito/index.html
+recursos/normas/une-19601/index.html
+recursos/normas/iso-37301/index.html
+recursos/normas/iso-27001/index.html
+recursos/normas/iso-42001/index.html
+recursos/normas/index.html
+en/intelligence/index.html
+en/academy/index.html
+en/escudito/index.html
+en/recursos/normas/une-19601/index.html
+en/recursos/normas/iso-37301/index.html
+en/recursos/normas/iso-27001/index.html
+en/recursos/normas/iso-42001/index.html
+en/recursos/normas/index.html
