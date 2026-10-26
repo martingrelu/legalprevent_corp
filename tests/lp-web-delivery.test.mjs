@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { leadFromSupabaseRow, validateLead, dashboardMetrics } from '../crm/src/store.js?v=20261001-2';
+import { leadFromSupabaseRow, validateLead, dashboardMetrics, updateLeadStatus } from '../crm/src/store.js?v=20261001-2';
 const read = path => readFileSync(new URL('../'+path,import.meta.url),'utf8');
 
 // Executes the real landing submit handler; every external operation is replaced.
@@ -45,4 +45,16 @@ test('ES and EN exclude unauthorised social proof and absolute promises; example
     const html=read(file);assert.doesNotMatch(html,/Novaline|Altair Group|Medixia|UrbanOps|Northbit|testimonial-card|Evita sanciones|Prevent penalties|soporte profesional ampliado|enhanced professional support|4\.8x|31h|41 horas|41 hours/);
     assert.match(html,/Datos ficticios|Fictional data/);
   }
+});
+
+
+test('quick status and drag/drop cannot schedule an undated demo or write state',()=>{
+  const state={currentUserId:'qa',users:[{id:'qa',role:'admin'}],leads:[{id:'qa-lead',status:'Nuevo',demoAt:''}],interactions:[]};
+  const before=JSON.stringify(state);
+  for(const demoAt of ['', 'not-a-date']) {
+    state.leads[0].demoAt=demoAt;
+    assert.throws(()=>updateLeadStatus(state,'qa-lead','Demo agendada'),/Confirma la fecha/);
+    assert.equal(state.leads[0].status,'Nuevo');assert.equal(state.interactions.length,0);
+  }
+  state.leads[0].demoAt='';assert.equal(JSON.stringify(state),before);
 });
