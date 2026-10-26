@@ -2763,7 +2763,6 @@ select {
 .lpx-window-main img { aspect-ratio: 1280 / 676; object-fit: cover; object-position: bottom; }
 .lpx-window-bar { display: flex; gap: 6px; padding: 0.6rem 0.8rem; background: #e8edf5; }
 .lpx-window-bar span { width: 9px; height: 9px; border-radius: 50%; background: #b6c2d4; }
-.lpx-window-float { display: none; }
 .lpx-sec.lpx-sec { padding: 4.5rem 0; }
 .lpx-head { display: grid; gap: 0.8rem; max-width: 760px; margin-bottom: 2.2rem; }
 .lpx-head h2, .lpx-intel-copy h2 { color: var(--blue-dark); font-size: clamp(1.8rem, 4vw, 2.7rem); line-height: 1.12; letter-spacing: -0.025em; text-wrap: balance; }
@@ -2799,14 +2798,28 @@ select {
 .lpx-audiences .lpx-note { color: #64748b; }
 .lpx-hero a:focus-visible, .lpx-intel a:focus-visible { outline: 3px solid #9db8ff; outline-offset: 3px; }
 @media (min-width: 900px) {
-  .lpx-hero-inner { grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); padding: 4.5rem 0 5rem; gap: 3.5rem; }
-  .lpx-stage { padding-bottom: 3.5rem; }
-  .lpx-window-main { transform: perspective(1600px) rotateY(-4deg); }
-  .lpx-window-float { position: absolute; display: block; left: -2.5rem; bottom: 1.5rem; width: 46%; max-height: 250px; border-radius: 12px; }
-  .lpx-window-float img { object-fit: cover; object-position: top; max-height: 250px; }
+  .lpx-hero-inner { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); padding: 4.5rem 0 5rem; gap: 3rem; }
+  .lpx-stage { margin-right: -3rem; }
+  .lpx-window-main { transform: perspective(1800px) rotateY(-3deg); transform-origin: left center; }
   .lpx-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .lpx-intel-inner { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 4rem; }
   .lpx-aud { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .lpx-sec.lpx-sec { padding: 6rem 0; }
 }
 @media (prefers-reduced-motion: reduce) { .lpx-card, .lpx-card:hover { transition: none; transform: none; } .lpx-window-main { transform: none; } }
+
+/* Refinamiento: captura única más grande, fondo con más profundidad en móvil y lanzador de Escudito discreto. */
+.lpx-hero { position: relative; }
+.lpx-hero::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px); background-size: 44px 44px; -webkit-mask-image: radial-gradient(ellipse at 70% 40%, #000 0%, transparent 70%); mask-image: radial-gradient(ellipse at 70% 40%, #000 0%, transparent 70%); pointer-events: none; }
+.lpx-hero-inner { position: relative; }
+.lpx-stage::before { content: ""; position: absolute; z-index: -1; inset: 8% -6% -6% 6%; background: radial-gradient(closest-side, rgba(30, 94, 255, 0.4), transparent); filter: blur(24px); }
+@media (max-width: 899px) {
+  .lpx-hero { background: radial-gradient(34rem 20rem at 100% 0%, rgba(30, 94, 255, 0.4), transparent 70%), radial-gradient(30rem 22rem at 0% 78%, rgba(56, 120, 255, 0.22), transparent 70%), linear-gradient(170deg, #0b1226 0%, #0f172a 50%, #17306b 100%); }
+  .lpx-stage { margin: 0 -0.6rem; }
+  .lpx-window-main { transform: perspective(1200px) rotateX(3deg); }
+}
+@media (max-width: 639px) {
+  #lp-agent .lpa-launcher { right: 10px; bottom: 10px; width: 44px; height: 44px; opacity: 0.82; }
+  #lp-agent .lpa-launcher .lpa-mascot { width: 30px; height: 30px; }
+  #lp-agent .lpa-launcher:hover, #lp-agent .lpa-launcher:focus-visible { opacity: 1; }
+}
