@@ -250,10 +250,10 @@ const buildDemoLead = (payload) => ({
   companyName: `Lead web - ${getEmailCompany(payload.email)}`,
   contactName: "Pendiente de completar",
   email: String(payload.email || "").trim().toLowerCase(),
-  status: "Demo agendada",
-  priority: "Alta",
-  recommendedPlan: "Pro",
-  riskScore: 65
+  status: "Nuevo",
+  priority: "Media",
+  recommendedPlan: "",
+  riskScore: null
 });
 
 const demoFailureMessage =

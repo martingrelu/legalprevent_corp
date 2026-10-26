@@ -49,7 +49,7 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20261002-1";
+} from "./store.js?v=20261026-lpweb1";
 import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261002-1";
 
 let state = applyAutomations(loadState());
@@ -707,7 +707,7 @@ function renderLeadDetail(id) {
             ...(lead.status === "Perdido" ? [["Motivo de perdida", optionLabel(LOST_REASONS, lead.lostReason) || "Sin indicar"]] : []),
             ["Plan recomendado", lead.recommendedPlan || "Pendiente"],
             ["MRR estimado", leadRevenueLabel(lead)],
-            ["Riesgo detectado", `${lead.riskScore}/100`],
+            ["Riesgo detectado", lead.riskScore == null ? "Sin evaluar" : `${lead.riskScore}/100`],
           ])}
         </article>
         <article class="panel">
@@ -1064,7 +1064,7 @@ function renderLeadModal(lead = null) {
     ownerId: getCurrentUser(state).id,
     recommendedPlan: "",
     estimatedMonthlyRevenue: "",
-    riskScore: 50,
+    riskScore: null,
   };
   return modal(
     lead ? "Editar lead" : "Nuevo lead",
@@ -1175,7 +1175,7 @@ function csvDefaults() {
     ownerId: getCurrentUser(state).id,
     recommendedPlan: "",
     estimatedMonthlyRevenue: 0,
-    riskScore: 50,
+    riskScore: null,
   };
 }
 
@@ -1185,7 +1185,7 @@ function normalizeCsvLead(lead) {
     ...lead,
     employees: Number(lead.employees || 0),
     estimatedMonthlyRevenue: Number(lead.estimatedMonthlyRevenue || selectedPlanPrice || 0),
-    riskScore: Number(lead.riskScore || 0),
+    riskScore: lead.riskScore == null || lead.riskScore === "" ? null : Number(lead.riskScore),
     nextActionAt: lead.nextActionAt ? new Date(lead.nextActionAt).toISOString() : "",
   };
 }
@@ -1843,9 +1843,9 @@ async function handleChange(event) {
   }
   if (target.dataset.action === "quick-status") {
     const previousState = state;
-    state = updateLeadStatus(state, target.dataset.id, target.value);
-    const lead = state.leads.find((item) => item.id === target.dataset.id);
     try {
+      state = updateLeadStatus(state, target.dataset.id, target.value);
+      const lead = state.leads.find((item) => item.id === target.dataset.id);
       if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
       render();
       showToast("Estado actualizado.");
@@ -1885,9 +1885,9 @@ async function handleDrop(event) {
   const leadId = event.dataTransfer.getData("text/plain");
   const nextStatus = mapPipelineToLeadStatus(column.dataset.dropStatus);
   const previousState = state;
-  state = updateLeadStatus(state, leadId, nextStatus);
-  const lead = state.leads.find((item) => item.id === leadId);
   try {
+    state = updateLeadStatus(state, leadId, nextStatus);
+    const lead = state.leads.find((item) => item.id === leadId);
     if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
     render();
     showToast(`Lead movido a ${nextStatus}.`);
