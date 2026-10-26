@@ -9,7 +9,7 @@ const normalise = text => text.replace(/\s+/g, ' ').trim();
 const escape = text => text.replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const decode = text => text.replace(/&(?:amp|lt|gt|quot|#39);/g, entity => ({'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&#39;':"'"}[entity]));
 const translate = text => dictionary[normalise(decode(text))] ?? decode(text);
-const pages = ['index.html', 'partner/index.html', 'diagnostico/index.html', 'gracias/index.html'];
+const pages = ['index.html', 'partner/index.html', 'diagnostico/index.html', 'gracias/index.html', 'intelligence/index.html', 'academy/index.html', 'escudito/index.html', 'recursos/normas/une-19601/index.html', 'recursos/normas/iso-37301/index.html', 'recursos/normas/iso-27001/index.html', 'recursos/normas/iso-42001/index.html', 'recursos/normas/index.html'];
 const routes = new Map(pages.map(path => [path === 'index.html' ? '/' : '/' + path.replace(/index\.html$/, ''), '/en/' + (path === 'index.html' ? '' : path.replace(/index\.html$/, ''))]));
 const outputs = new Map();
 const alternate = route => `<link rel="alternate" hreflang="es" href="https://legalprevent.com${route}" />\n    <link rel="alternate" hreflang="en" href="https://legalprevent.com${routes.get(route)}" />\n    <link rel="alternate" hreflang="x-default" href="https://legalprevent.com${route}" />`;
@@ -72,7 +72,7 @@ for (const file of pages) {
 outputs.set('i18n/en-runtime.js', `(() => {\nconst dictionary = ${JSON.stringify(dictionary)};\n${read('tools/i18n-runtime-source.js')}\n})();\n`);
 
 const indexed = ['/', '/partner/', '/diagnostico/', '/aviso-legal/', '/politica-privacidad/', '/politica-cookies/', '/terminos-condiciones/', '/documentacion-legal/', '/blog/', '/blog/obligaciones-legales-pyme-espana-2026/'];
-const sitemapUrls = [...indexed, ...[...routes.entries()].filter(([route])=>route!=='/gracias/').map(([,route])=>route)];
+const sitemapUrls = [...indexed, ...["/intelligence/", "/academy/", "/escudito/", "/recursos/normas/une-19601/", "/recursos/normas/iso-37301/", "/recursos/normas/iso-27001/", "/recursos/normas/iso-42001/", "/recursos/normas/"], ...[...routes.entries()].filter(([route])=>route!=='/gracias/').map(([,route])=>route)];
 outputs.set('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${sitemapUrls.map(route=>{
   const spanish = route.startsWith('/en/') ? [...routes.entries()].find(([,en])=>en===route)[0] : route;
   const links = routes.has(spanish) ? ['es','en','x-default'].map(lang=>`<xhtml:link rel="alternate" hreflang="${lang}" href="https://legalprevent.com${lang==='en'?routes.get(spanish):spanish}" />`).join('') : '';

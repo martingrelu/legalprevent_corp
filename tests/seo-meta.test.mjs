@@ -28,6 +28,8 @@ const INDEXABLE = {
   "terminos-condiciones/index.html": "/terminos-condiciones/",
   "documentacion-legal/index.html": "/documentacion-legal/",
 };
+const COMMERCIAL = ["intelligence", "academy", "escudito", "recursos/normas", "recursos/normas/une-19601", "recursos/normas/iso-37301", "recursos/normas/iso-27001", "recursos/normas/iso-42001"];
+for (const path of COMMERCIAL) INDEXABLE[path+"/index.html"] = "/"+path+"/";
 const ICONS = ["/favicon.ico", "/favicon.svg", "/apple-touch-icon.png"];
 
 const meta = (html, attr, key) => {
@@ -123,7 +125,7 @@ test("robots.txt permite rastrear (incluido el noindex del CRM) y anuncia el sit
 
 test("sitemap.xml contiene exactamente las páginas indexables publicadas", () => {
   const locs = [...read("sitemap.xml").matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
-  const expected = [...Object.values(INDEXABLE), "/en/", "/en/partner/", "/en/diagnostico/", "/blog/", "/blog/obligaciones-legales-pyme-espana-2026/"].map((path) => BASE + path);
+  const expected = [...Object.values(INDEXABLE), ...COMMERCIAL.map(path=>"/en/"+path+"/"), "/en/", "/en/partner/", "/en/diagnostico/", "/blog/", "/blog/obligaciones-legales-pyme-espana-2026/"].map((path) => BASE + path);
   assert.deepEqual([...locs].sort(), [...expected].sort());
   for (const [file] of Object.entries(INDEXABLE)) assert.ok(allowlist.has(file), `${file} en la allowlist`);
   assert.ok(!locs.some((loc) => /gracias|crm/.test(loc)), "ni gracias ni CRM en el sitemap");
