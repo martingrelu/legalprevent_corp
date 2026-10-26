@@ -349,6 +349,7 @@ export function updateLeadStatus(state, leadId, nextStatus) {
   const lead = next.leads.find((item) => item.id === leadId);
   if (!lead || lead.status === nextStatus) return state;
 
+  validateDemoAppointment({ ...lead, status: nextStatus });
   const previous = lead.status;
   lead.status = nextStatus;
   lead.lastInteractionAt = new Date().toISOString();
@@ -522,11 +523,15 @@ export function upsertLead(state, formData, id = "") {
   return applyAutomations(next);
 }
 
+function validateDemoAppointment(lead) {
+  if (lead.status === "Demo agendada" && (!lead.demoAt || !Number.isFinite(Date.parse(lead.demoAt)))) throw new Error("Confirma la fecha y hora de la cita antes de marcar Demo agendada.");
+}
+
 export function validateLead(lead) {
   if (!lead.companyName || !lead.contactName) throw new Error("Empresa y contacto son obligatorios.");
   if (!isValidEmail(lead.email)) throw new Error("El email del lead no tiene un formato valido.");
   if (!LEAD_STATUSES.includes(lead.status)) throw new Error("Estado de lead no valido.");
-  if (lead.status === "Demo agendada" && (!lead.demoAt || !Number.isFinite(Date.parse(lead.demoAt)))) throw new Error("Confirma la fecha y hora de la cita antes de marcar Demo agendada.");
+  validateDemoAppointment(lead);
   if (!PRIORITIES.includes(lead.priority)) throw new Error("Prioridad no valida.");
   if (lead.recommendedPlan && !PLANS.includes(lead.recommendedPlan)) throw new Error("Plan recomendado no valido.");
   if (lead.leadType && !LEAD_TYPES.some(([value]) => value === lead.leadType)) throw new Error("Tipo de lead no valido.");

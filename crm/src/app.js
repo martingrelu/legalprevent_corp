@@ -1843,9 +1843,9 @@ async function handleChange(event) {
   }
   if (target.dataset.action === "quick-status") {
     const previousState = state;
-    state = updateLeadStatus(state, target.dataset.id, target.value);
-    const lead = state.leads.find((item) => item.id === target.dataset.id);
     try {
+      state = updateLeadStatus(state, target.dataset.id, target.value);
+      const lead = state.leads.find((item) => item.id === target.dataset.id);
       if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
       render();
       showToast("Estado actualizado.");
@@ -1885,9 +1885,9 @@ async function handleDrop(event) {
   const leadId = event.dataTransfer.getData("text/plain");
   const nextStatus = mapPipelineToLeadStatus(column.dataset.dropStatus);
   const previousState = state;
-  state = updateLeadStatus(state, leadId, nextStatus);
-  const lead = state.leads.find((item) => item.id === leadId);
   try {
+    state = updateLeadStatus(state, leadId, nextStatus);
+    const lead = state.leads.find((item) => item.id === leadId);
     if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
     render();
     showToast(`Lead movido a ${nextStatus}.`);
