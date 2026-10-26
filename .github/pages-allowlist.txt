@@ -68,3 +68,9 @@ en/recursos/normas/iso-37301/index.html
 en/recursos/normas/iso-27001/index.html
 en/recursos/normas/iso-42001/index.html
 en/recursos/normas/index.html
+
+# LP-WEB-DESIGN-2026 · capturas de producto (entorno de pruebas, datos simulados)
+assets/product/dashboard.jpg
+assets/product/intelligence.jpg
+assets/product/archivo.jpg
+assets/product/diagnostico.jpg

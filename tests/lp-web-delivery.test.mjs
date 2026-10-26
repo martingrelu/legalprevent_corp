@@ -43,7 +43,7 @@ test('CRM requires a dated appointment before saving Demo agendada',()=>{
 test('ES and EN exclude unauthorised social proof and absolute promises; examples are labelled',()=>{
   for(const file of ['index.html','en/index.html']){
     const html=read(file);assert.doesNotMatch(html,/Novaline|Altair Group|Medixia|UrbanOps|Northbit|testimonial-card|Evita sanciones|Prevent penalties|soporte profesional ampliado|enhanced professional support|4\.8x|31h|41 horas|41 hours/);
-    assert.match(html,/Datos ficticios|Fictional data/);
+    assert.match(html,/Datos ficticios|Fictional data|datos simulados|simulated data/);
   }
 });
 
