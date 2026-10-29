@@ -940,3 +940,19 @@ export function filteredClients(state, filters) {
     return matchesQuery && matchesStatus && matchesPlan && matchesOwner;
   });
 }
+
+// Estados que Supabase devuelve cuando la retirada queda confirmada en la nube.
+export const CONSENT_WITHDRAWAL_CONFIRMED = new Set(["withdrawn", "not_consented"]);
+
+// Retirada local tras confirmación remota. Solo puede dejar el consentimiento en "retirado":
+// nunca lo restaura, y si el lead ya estaba retirado no cambia la fecha original.
+export function withdrawConsentLocally(state, leadId, at = new Date().toISOString()) {
+  return {
+    ...state,
+    leads: state.leads.map((lead) =>
+      lead.id === leadId
+        ? { ...lead, commercialConsent: false, commercialConsentWithdrawnAt: lead.commercialConsentWithdrawnAt || at }
+        : lead,
+    ),
+  };
+}

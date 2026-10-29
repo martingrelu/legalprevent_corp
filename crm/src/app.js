@@ -56,6 +56,8 @@ import {
   isPersistenceBlocked,
   onStateSaved,
   onStateSaveError,
+  CONSENT_WITHDRAWAL_CONFIRMED,
+  withdrawConsentLocally,
 } from "./store.js?v=20261029-crm2";
 import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261002-1";
 import { createSyncController, LOCAL_ONLY_MESSAGE, planImport, writeRows } from "./sync.js?v=20261029-crm2";
@@ -1521,9 +1523,25 @@ async function handleSubmit(event) {
       if (typed !== String(lead.email || "").trim().toLowerCase()) {
         throw new Error("El email escrito no coincide con el del lead.");
       }
-      const result = await window.LegalPreventSupabase.eraseContact(lead.email, String(formData.get("reason") || ""));
-      state = removeLeadAndRelated(state, lead.id);
-      saveState(state);
+      let result;
+      try {
+        result = await window.LegalPreventSupabase.eraseContact(lead.email, String(formData.get("reason") || ""));
+      } catch (error) {
+        throw new Error(`No se ha eliminado nada en Supabase y este navegador no se ha modificado. ${error.message || ""}`.trim());
+      }
+      // Remoto confirmado: solo entonces se prepara el estado local. Si el guardado local falla,
+      // el contacto sigue aquí y repetir la eliminación es seguro (idempotente en Supabase).
+      const erasedState = removeLeadAndRelated(state, lead.id);
+      try {
+        saveState(erasedState);
+      } catch (error) {
+        throw new Error(
+          `Supabase confirmó la eliminación (${result.leads_deleted} leads y ${result.diagnostics_deleted} diagnósticos), ` +
+          `pero este navegador no la ha guardado (${error.message}). Discrepancia pendiente: el contacto sigue en este navegador. ` +
+          "Repite la eliminación para completarla; repetirla es seguro.",
+        );
+      }
+      state = erasedState;
       closeModal();
       // El cambio de ruta vuelve a pintar la página (y el aviso) al disparar hashchange.
       window.addEventListener("hashchange", () => {
@@ -1536,14 +1554,35 @@ async function handleSubmit(event) {
     if (formType === "withdraw-consent") {
       const lead = state.leads.find((item) => item.id === form.dataset.id);
       if (!lead?.supabaseId) throw new Error("Lead no encontrado.");
-      const result = await window.LegalPreventSupabase.withdrawCommercialConsent(lead.supabaseId);
-      if (result.status === "withdrawn" || result.status === "not_consented") {
-        Object.assign(lead, { commercialConsent: false, commercialConsentWithdrawnAt: lead.commercialConsentWithdrawnAt || new Date().toISOString() });
-        saveState(state);
+      let result;
+      try {
+        result = await window.LegalPreventSupabase.withdrawCommercialConsent(lead.supabaseId);
+      } catch (error) {
+        throw new Error(`No se ha retirado el consentimiento en Supabase y este navegador no se ha modificado. ${error.message || ""}`.trim());
       }
+      // Solo estos dos estados confirman que el consentimiento está retirado en la nube.
+      // Cualquier otro (p. ej. not_found) no se trata como éxito ni cambia nada local.
+      if (!CONSENT_WITHDRAWAL_CONFIRMED.has(result.status)) {
+        throw new Error(`Supabase no confirmó la retirada (estado: ${result.status || "desconocido"}). Este navegador no se ha modificado.`);
+      }
+      // Nunca se restaura un consentimiento: withdrawConsentLocally solo puede dejarlo en "retirado".
+      const withdrawnState = withdrawConsentLocally(state, lead.id);
+      try {
+        saveState(withdrawnState);
+      } catch (error) {
+        throw new Error(
+          `Supabase confirmó la retirada, pero este navegador no la ha guardado (${error.message}). ` +
+          "Discrepancia pendiente: aquí el lead aparece aún con consentimiento. Repite la retirada: es segura y no restaura nada.",
+        );
+      }
+      state = withdrawnState;
       closeModal();
       render();
-      showToast(result.status === "withdrawn" ? "Consentimiento comercial retirado." : "Este lead ya no tenía consentimiento comercial.");
+      showToast(
+        result.status === "withdrawn"
+          ? "Consentimiento comercial retirado en Supabase y guardado en este navegador."
+          : "El lead ya no tenía consentimiento en Supabase. Estado local confirmado.",
+      );
       return;
     }
 
