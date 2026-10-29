@@ -84,12 +84,25 @@ export function isPersistenceBlocked() {
   return persistenceBlocked;
 }
 
+// Oyentes: la sincronización con la nube y los avisos visibles se conectan aquí,
+// así que cada guardado local pasa por el mismo punto.
+let savedListener = null;
+let saveErrorListener = null;
+export function onStateSaved(listener) { savedListener = listener; }
+export function onStateSaveError(listener) { saveErrorListener = listener; }
+
 export function saveState(state, storage = defaultStorage()) {
-  if (persistenceBlocked) {
-    throw new Error(`Guardado bloqueado: ${persistenceBlocked}`);
+  try {
+    if (persistenceBlocked) {
+      throw new Error(`Guardado bloqueado: ${persistenceBlocked}`);
+    }
+    if (!storage) throw new Error("No hay almacenamiento local disponible.");
+    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    saveErrorListener?.(error);
+    throw error;
   }
-  if (!storage) throw new Error("No hay almacenamiento local disponible.");
-  storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  savedListener?.(state);
 }
 
 export function createBackup(state) {
@@ -890,7 +903,7 @@ export function logActivity(state, entityType, entityId, action, detail) {
 export function filteredLeads(state, filters) {
   return state.leads.filter((lead) => {
     const query = filters.query?.toLowerCase() || "";
-    const isReal = lead.dataOrigin === "supabase" || lead.externalSource === "supabase" || Boolean(lead.supabaseId);
+    const isReal = !isDemoRecord(lead);
     const matchesQuery =
       !query ||
       lead.companyName.toLowerCase().includes(query) ||

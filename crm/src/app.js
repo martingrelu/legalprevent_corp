@@ -51,12 +51,59 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20261026-lpweb1";
+  hasRealLink,
+  isDemoRecord,
+  isPersistenceBlocked,
+  onStateSaved,
+  onStateSaveError,
+} from "./store.js?v=20261029-crm2";
 import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261002-1";
+import { createSyncController, LOCAL_ONLY_MESSAGE, planImport, writeRows } from "./sync.js?v=20261029-crm2";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();
 let toastTimer = null;
+
+// ---- Estado de sincronización visible ----
+// Cada guardado local pasa por aquí. Solo se muestra "sincronizado" cuando la nube lo confirma.
+let cloudStatus = { state: "local", message: LOCAL_ONLY_MESSAGE, error: "" };
+
+function cloudAuth() {
+  try {
+    const session = window.LegalPreventSupabase?.getSession?.();
+    const config = window.LEGAL_PREVENT_SUPABASE || {};
+    if (!session?.access_token || !config.url || !config.anonKey) return null;
+    return {
+      baseUrl: String(config.url).trim().replace(/\/$/, ""),
+      anonKey: String(config.anonKey).trim(),
+      accessToken: session.access_token,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const cloudSync = createSyncController({
+  getAuth: cloudAuth,
+  isOnline: () => navigator.onLine !== false,
+  onStatus: (status) => {
+    cloudStatus = status;
+    const element = document.querySelector("[data-sync-status]");
+    if (element) {
+      element.textContent = status.message;
+      element.className = `sync-status ${status.state}`;
+    }
+  },
+});
+
+onStateSaved((savedState) => cloudSync.changed(savedState));
+onStateSaveError((error) => {
+  showToast(`No se ha guardado el cambio: ${error.message}. Exporta una copia antes de seguir.`, "error");
+});
+window.addEventListener("online", () => cloudSync.retry());
+if (isPersistenceBlocked()) {
+  cloudStatus = { state: "error", message: `Guardado bloqueado: ${isPersistenceBlocked()}`, error: "blocked" };
+}
 let csvImportSession = null;
 
 const LEAD_PLAN_PRICES = {
@@ -224,14 +271,17 @@ function renderTopbar(user) {
               .join("")}
           </select>
         </label>
+        <span class="sync-status ${cloudStatus.state}" data-sync-status role="status" aria-live="polite">${escapeHtml(cloudStatus.message)}</span>
+        ${cloudStatus.state === "error" ? `<button class="small-button" data-action="retry-cloud-sync">Reintentar</button>` : ""}
         ${
           supabaseConfigured
             ? supabaseSession
               ? `<button class="secondary-button" data-action="sync-supabase">Sincronizar Supabase</button>
                  <button class="ghost-button" data-action="supabase-logout">Cerrar Supabase</button>`
               : `<button class="secondary-button" data-action="open-supabase-login">Conectar Supabase</button>`
-            : `<span class="sync-status">Supabase pendiente</span>`
+            : ""
         }
+        <button class="secondary-button" data-action="import-cloud-backup">Importar copia a la nube</button>
         <button class="secondary-button" data-action="export-backup">Exportar copia</button>
         <button class="secondary-button" data-action="open-import-backup">Importar copia</button>
         <button class="secondary-button" data-action="open-csv-import">Importar CSV</button>
@@ -303,7 +353,7 @@ function renderDashboard() {
       <section class="data-mode-panel">
         <div>
           <p class="eyebrow">Datos comerciales</p>
-          <h2>${realLeadCount} leads reales sincronizados</h2>
+          <h2>${realLeadCount} leads reales</h2>
           <p>${demoLeadCount ? `${demoLeadCount} leads demo siguen disponibles para pruebas.` : "Dashboard limpio, sin leads demo."}</p>
           ${renderRetentionStatus(state.meta?.retentionPreview)}
         </div>
@@ -507,7 +557,7 @@ function renderRetentionStatus(preview) {
 // Supresión y retirada del consentimiento: solo para leads sincronizados con
 // Supabase (el servidor comprueba además que el usuario es administrador).
 function renderPrivacyPanel(lead) {
-  if (!isRealLead(lead) || !lead.supabaseId) return "";
+  if (!hasRealLink(lead) || !lead.supabaseId) return "";
   return `
     <article class="panel">
       <div class="panel-header"><h3>Protección de datos</h3></div>
@@ -1551,6 +1601,8 @@ function handleClick(event) {
   if (action === "clear-filters") {
     window.location.hash = `#/${view.name}`;
   }
+  if (action === "retry-cloud-sync") cloudSync.retry();
+  if (action === "import-cloud-backup") importBackupToCloud();
   if (action === "reset-demo") {
     const confirmed = window.confirm(
       "Restaurar demo sustituye TODO el contenido del CRM de este navegador por datos de ejemplo. " +
@@ -1788,8 +1840,9 @@ function formatStripeAddress(address = {}) {
   return [address.line1, address.line2, address.postal_code, address.city, address.country].filter(Boolean).join(", ");
 }
 
+// Real = no es un registro de demostración (incluye los creados a mano).
 function isRealLead(lead) {
-  return lead?.dataOrigin === "supabase" || lead?.externalSource === "supabase" || Boolean(lead?.supabaseId);
+  return Boolean(lead) && !isDemoRecord(lead);
 }
 
 function isRealClient(client) {
@@ -1861,7 +1914,7 @@ async function handleChange(event) {
     try {
       state = updateLeadStatus(state, target.dataset.id, target.value);
       const lead = state.leads.find((item) => item.id === target.dataset.id);
-      if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+      if (hasRealLink(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
       render();
       showToast("Estado actualizado.");
     } catch (error) {
@@ -1903,7 +1956,7 @@ async function handleDrop(event) {
   try {
     state = updateLeadStatus(state, leadId, nextStatus);
     const lead = state.leads.find((item) => item.id === leadId);
-    if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+    if (hasRealLink(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
     render();
     showToast(`Lead movido a ${nextStatus}.`);
   } catch (error) {
@@ -2009,6 +2062,49 @@ function modal(title, body, extraClass = "") {
       ${body}
     </section>
   `;
+}
+
+// Importa una copia exportada a la nube. Simula antes, pide confirmación, no sobrescribe
+// nada existente y no modifica ni borra el estado local ni el fichero de copia.
+function importBackupToCloud() {
+  const auth = cloudAuth();
+  if (!auth) {
+    showToast("Conecta Supabase como administrador para importar la copia a la nube.", "error");
+    return;
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      const plan = planImport(backup);
+      if (plan.blocking) {
+        showToast("La copia no es válida: hay registros sin identificador.", "error");
+        return;
+      }
+      if (plan.wouldWrite === 0) {
+        showToast("La copia no contiene registros reales para importar.", "error");
+        return;
+      }
+      const t = plan.report.totals;
+      const summary =
+        `Simulación de importación:\n` +
+        `- Clientes: ${t.client || 0}, tareas: ${t.task || 0}, interacciones: ${t.interaction || 0}, propuestas: ${t.proposal || 0}.\n` +
+        `- Registros reales a importar: ${plan.wouldWrite}.\n` +
+        `- Duplicados dentro del fichero (se omiten): ${plan.report.duplicatesInFile.length}.\n` +
+        `- Relaciones huérfanas (se importan y se marcan): ${plan.report.danglingRelations.length}.\n\n` +
+        `Solo se insertan registros que no existan ya en la nube. No se modifica nada en este navegador. ¿Continuar?`;
+      if (!window.confirm(summary)) return;
+      const result = await writeRows(plan.rows, auth, { mode: "ignore" });
+      showToast(`Importación completada: ${result.inserted} nuevos y ${result.skipped} ya existían en la nube.`);
+    } catch (error) {
+      showToast(error.message || "No se pudo importar la copia.", "error");
+    }
+  };
+  input.click();
 }
 
 function showToast(message, kind = "success") {
