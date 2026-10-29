@@ -29,6 +29,7 @@ export class SyncError extends Error {
 }
 
 export function syncErrorMessage(status, detail = "") {
+  if (status === 0) return "No hay conexión con la nube.";
   if (status === 401 || status === 403) return "Sin permiso para escribir en la nube. Revisa que la cuenta sea administradora del CRM.";
   if (status === 404) return "La tabla crm_records no existe en esta base de datos. Falta aplicar la migración.";
   if (status === 409) return "Conflicto al escribir en la nube. Reintenta la sincronización.";
@@ -86,16 +87,23 @@ export async function writeRows(rows, auth, { mode = "merge", fetchImpl = global
 
   for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
     const chunk = rows.slice(offset, offset + BATCH_SIZE);
-    const response = await fetchImpl(`${auth.baseUrl}${TABLE_PATH}?on_conflict=kind,local_id`, {
-      method: "POST",
-      headers: {
-        apikey: auth.anonKey,
-        Authorization: `Bearer ${auth.accessToken}`,
-        "Content-Type": "application/json",
-        Prefer: prefer,
-      },
-      body: JSON.stringify(chunk),
-    });
+    let response;
+    try {
+      response = await fetchImpl(`${auth.baseUrl}${TABLE_PATH}?on_conflict=kind,local_id`, {
+        method: "POST",
+        headers: {
+          apikey: auth.anonKey,
+          Authorization: `Bearer ${auth.accessToken}`,
+          "Content-Type": "application/json",
+          Prefer: prefer,
+        },
+        body: JSON.stringify(chunk),
+      });
+    } catch {
+      // Fallo de red: la petición no llegó a confirmarse. Los lotes ya confirmados no se revierten,
+      // y repetir la escritura no duplica (upsert por kind+local_id).
+      throw new SyncError(0, "");
+    }
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
       throw new SyncError(response.status, detail);

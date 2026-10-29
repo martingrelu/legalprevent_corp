@@ -1484,7 +1484,7 @@ async function handleSubmit(event) {
       state = applyAutomations(importBackup(backup));
       closeModal();
       render();
-      showToast("Copia importada correctamente.");
+      showToast("Copia importada en este navegador. Aún no está en la nube: usa «Importar copia a la nube» para subirla.");
       return;
     }
 
@@ -1548,6 +1548,7 @@ async function handleSubmit(event) {
     }
 
     const formData = new FormData(form);
+    let remoteConfirmed = false;
     if (formType === "lead") {
       const previousState = state;
       const previousId = form.dataset.id;
@@ -1556,21 +1557,27 @@ async function handleSubmit(event) {
         ? nextState.leads.find((lead) => lead.id === previousId)
         : nextState.leads[0];
 
+      let remoteLead;
       try {
-        const remoteLead = await window.LegalPreventSupabase.saveCrmLead(savedLead);
-        Object.assign(savedLead, {
-          supabaseId: remoteLead.id,
-          dataOrigin: "supabase",
-          externalSource: "supabase",
-          leadOrigin: leadOriginFromRow(remoteLead)
-        });
-        saveState(nextState);
-        state = nextState;
+        remoteLead = await window.LegalPreventSupabase.saveCrmLead(savedLead);
       } catch (error) {
-        saveState(previousState);
+        revertLocalState(previousState);
         state = previousState;
-        throw error;
+        throw new Error(`No se ha guardado en Supabase; el cambio se ha revertido en este navegador. ${error.message}`);
       }
+      Object.assign(savedLead, {
+        supabaseId: remoteLead.id,
+        dataOrigin: "supabase",
+        externalSource: "supabase",
+        leadOrigin: leadOriginFromRow(remoteLead)
+      });
+      try {
+        saveState(nextState);
+      } catch (error) {
+        throw new Error(`Confirmado por Supabase, pero no guardado en este navegador (${error.message}). Exporta una copia y recarga antes de seguir.`);
+      }
+      state = nextState;
+      remoteConfirmed = true;
     }
     if (formType === "task") state = upsertTask(state, formData, form.dataset.id);
     if (formType === "proposal") state = upsertProposal(state, formData, form.dataset.id);
@@ -1579,9 +1586,19 @@ async function handleSubmit(event) {
 
     closeModal();
     render();
-    showToast("Cambios guardados correctamente.");
+    showToast(remoteConfirmed ? "Guardado en Supabase y en este navegador." : "Guardado en este navegador.");
   } catch (error) {
     showToast(error.message, "error");
+  }
+}
+
+// Revierte el estado local tras un fallo. Si el propio guardado falla, el aviso de error ya se muestra
+// desde saveState; aquí solo se evita una excepción sin manejar.
+function revertLocalState(previousState) {
+  try {
+    saveState(previousState);
+  } catch {
+    // Sin efecto adicional: el error original se comunica al usuario.
   }
 }
 
@@ -1662,17 +1679,29 @@ function handleClick(event) {
     openModal(renderProposalModal(proposal, button.dataset.relatedType || "lead", button.dataset.relatedId || ""));
   }
   if (action === "convert-lead") {
-    state = convertLeadToClient(state, button.dataset.id);
-    render();
-    showToast("Lead convertido en cliente.");
+    const previousState = state;
+    try {
+      state = convertLeadToClient(state, button.dataset.id);
+      render();
+      showToast("Lead convertido en cliente. Guardado en este navegador.");
+    } catch (error) {
+      state = previousState;
+      showToast(`No se ha convertido el lead. ${error.message || ""}`.trim(), "error");
+    }
   }
   if (action === "accept-proposal") {
     const proposal = state.proposals.find((item) => item.id === button.dataset.id);
     if (proposal) {
-      const formData = proposalToFormData({ ...proposal, status: "Aceptada" });
-      state = upsertProposal(state, formData, proposal.id);
-      render();
-      showToast("Propuesta aceptada y lead convertido.");
+      const previousState = state;
+      try {
+        const formData = proposalToFormData({ ...proposal, status: "Aceptada" });
+        state = upsertProposal(state, formData, proposal.id);
+        render();
+        showToast("Propuesta aceptada y lead convertido. Guardado en este navegador.");
+      } catch (error) {
+        state = previousState;
+        showToast(`No se ha aceptado la propuesta. ${error.message || ""}`.trim(), "error");
+      }
     }
   }
 }
@@ -1914,14 +1943,16 @@ async function handleChange(event) {
     try {
       state = updateLeadStatus(state, target.dataset.id, target.value);
       const lead = state.leads.find((item) => item.id === target.dataset.id);
-      if (hasRealLink(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+      if (hasRealLink(lead)) {
+        await window.LegalPreventSupabase.saveCrmLead(lead);
+      }
       render();
-      showToast("Estado actualizado.");
+      showToast(hasRealLink(lead) ? "Estado guardado en Supabase y en este navegador." : "Estado guardado en este navegador.");
     } catch (error) {
       state = previousState;
-      saveState(state);
+      revertLocalState(previousState);
       render();
-      showToast(`No se pudo actualizar el estado: ${error.message}`, "error");
+      showToast(`No se pudo actualizar el estado: ${error.message}. Se ha revertido en este navegador.`, "error");
     }
     return;
   }
@@ -1956,14 +1987,16 @@ async function handleDrop(event) {
   try {
     state = updateLeadStatus(state, leadId, nextStatus);
     const lead = state.leads.find((item) => item.id === leadId);
-    if (hasRealLink(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+    if (hasRealLink(lead)) {
+      await window.LegalPreventSupabase.saveCrmLead(lead);
+    }
     render();
-    showToast(`Lead movido a ${nextStatus}.`);
+    showToast(hasRealLink(lead) ? `Lead movido a ${nextStatus}: guardado en Supabase y en este navegador.` : `Lead movido a ${nextStatus}: guardado en este navegador.`);
   } catch (error) {
     state = previousState;
-    saveState(state);
+    revertLocalState(previousState);
     render();
-    showToast(`No se pudo mover el lead: ${error.message}`, "error");
+    showToast(`No se pudo mover el lead: ${error.message}. Se ha revertido en este navegador.`, "error");
   }
 }
 
@@ -2099,9 +2132,12 @@ function importBackupToCloud() {
         `Solo se insertan registros que no existan ya en la nube. No se modifica nada en este navegador. ¿Continuar?`;
       if (!window.confirm(summary)) return;
       const result = await writeRows(plan.rows, auth, { mode: "ignore" });
-      showToast(`Importación completada: ${result.inserted} nuevos y ${result.skipped} ya existían en la nube.`);
+      showToast(`Confirmado por Supabase: ${result.inserted} nuevos y ${result.skipped} ya existían en la nube.`);
     } catch (error) {
-      showToast(error.message || "No se pudo importar la copia.", "error");
+      showToast(
+        `${error.message || "No se pudo importar la copia."} Este navegador no se ha modificado. Si se interrumpió, repite la importación: no duplica registros.`,
+        "error",
+      );
     }
   };
   input.click();

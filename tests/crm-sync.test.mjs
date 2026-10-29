@@ -227,3 +227,75 @@ test("filteredLeads separa demo de reales creados a mano", () => {
   assert.ok(demo.includes("lead-1"), "el lead de demostración sigue siendo demo");
   assert.ok(!demo.includes("lead-1700000000000-abc12"));
 });
+
+// Servidor PostgREST simulado con la semántica de la clave única (kind, local_id).
+function fakePostgrest({ failBatchAt = -1 } = {}) {
+  const table = new Map();
+  let batch = 0;
+  const fetchImpl = async (url, options) => {
+    const current = batch++;
+    if (current === failBatchAt) throw new TypeError("Failed to fetch");
+    const ignore = /ignore-duplicates/.test(options.headers.Prefer);
+    const inserted = [];
+    for (const row of JSON.parse(options.body)) {
+      const key = `${row.kind}:${row.local_id}`;
+      if (table.has(key) && ignore) continue;
+      if (!table.has(key)) inserted.push(row);
+      table.set(key, row);
+    }
+    return { ok: true, status: 201, json: async () => inserted, text: async () => "" };
+  };
+  return { fetchImpl, table };
+}
+
+test("importar la misma copia dos veces no duplica registros", async () => {
+  const backup = { data: stateWithManualRecords() };
+  const { rows } = planImport(backup);
+  const remote = fakePostgrest();
+  const first = await writeRows(rows, AUTH, { mode: "ignore", fetchImpl: remote.fetchImpl });
+  const second = await writeRows(rows, AUTH, { mode: "ignore", fetchImpl: remote.fetchImpl });
+  assert.equal(first.inserted, rows.length);
+  assert.equal(second.inserted, 0, "la segunda importación no inserta nada");
+  assert.equal(second.skipped, rows.length);
+  assert.equal(remote.table.size, rows.length);
+});
+
+test("un fallo de red a mitad de envío no pierde nada y reintentar no duplica", async () => {
+  const rows = Array.from({ length: 450 }, (_, i) => ({ kind: "task", local_id: `t-${i}`, payload: {} }));
+  const remote = fakePostgrest({ failBatchAt: 1 });
+  await assert.rejects(writeRows(rows, AUTH, { mode: "ignore", fetchImpl: remote.fetchImpl }), (error) => {
+    assert.equal(error.status, 0);
+    assert.match(error.message, /conexión/);
+    return true;
+  });
+  assert.equal(remote.table.size, 200, "solo el primer lote quedó confirmado");
+  // Reintento completo contra el mismo servidor, ya sin fallo: solo entran los 250 pendientes.
+  const healthy = await writeRows(rows, AUTH, { mode: "ignore", fetchImpl: remote.fetchImpl });
+  assert.equal(healthy.inserted, 250);
+  assert.equal(healthy.skipped, 200);
+  assert.equal(remote.table.size, 450);
+});
+
+test("un fallo de red al sincronizar deja el estado local intacto", async () => {
+  const state = stateWithManualRecords();
+  const snapshot = clone(state);
+  const timers = [];
+  const controller = createSyncController({
+    getAuth: () => AUTH,
+    write: async () => { throw Object.assign(new SyncError(0, ""), {}); },
+    setTimer: (fn) => { timers.push(fn); return timers.length; },
+    clearTimer: () => {},
+  });
+  controller.changed(state);
+  await timers.shift()();
+  assert.equal(controller.status().state, "error");
+  assert.match(controller.status().message, /Los datos siguen en este navegador/);
+  assert.deepEqual(state, snapshot, "el estado local no se modifica");
+});
+
+test("planImport no modifica la copia que se le pasa", () => {
+  const backup = { data: stateWithManualRecords() };
+  const snapshot = clone(backup);
+  planImport(backup);
+  assert.deepEqual(backup, snapshot);
+});
