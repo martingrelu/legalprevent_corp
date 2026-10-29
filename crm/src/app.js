@@ -19,7 +19,9 @@ import {
   buildAlerts,
   canAccess,
   convertLeadToClient,
+  clearDemoRecordsSafely,
   createBackup,
+  removeDemoRecords,
   dashboardMetrics,
   filteredClients,
   filteredLeads,
@@ -322,6 +324,8 @@ function renderDashboard() {
         ${metricCard("Facturacion mensual", formatCurrency(metrics.monthlyRevenue), "MRR estimado")}
         ${metricCard("Conversion", `${metrics.conversionRate}%`, "Lead a cliente")}
       </section>
+
+      ${renderCommercialAgenda(state)}
 
       <section class="two-column">
         <article class="panel chart-panel">
@@ -1548,9 +1552,18 @@ function handleClick(event) {
     window.location.hash = `#/${view.name}`;
   }
   if (action === "reset-demo") {
-    state = applyAutomations(resetState());
-    render();
-    showToast("Datos demo restaurados.");
+    const confirmed = window.confirm(
+      "Restaurar demo sustituye TODO el contenido del CRM de este navegador por datos de ejemplo. " +
+      "Antes se guardará una copia del estado actual en este navegador. ¿Continuar?"
+    );
+    if (!confirmed) return;
+    try {
+      state = applyAutomations(resetState());
+      render();
+      showToast("Datos demo restaurados. La copia anterior está guardada en este navegador.");
+    } catch (error) {
+      showToast(error.message || "No se pudo restaurar la demo.");
+    }
   }
   if (action === "clear-demo-data") clearDemoData();
   if (action === "export-backup") exportBackup();
@@ -1783,26 +1796,28 @@ function isRealClient(client) {
   return client?.dataOrigin === "stripe" || Boolean(client?.stripeCustomerId) || Boolean(client?.stripeSubscriptionId);
 }
 
+// Solo elimina registros identificados como demo (ver store.js: removeDemoRecords).
+// Antes guarda una copia del estado; si la copia falla, no borra nada.
 function clearDemoData() {
-  const beforeLeads = state.leads.length;
-  const realLeadIds = new Set(state.leads.filter(isRealLead).map((lead) => lead.id));
-  const realClientIds = new Set(state.clients.filter(isRealClient).map((client) => client.id));
-  state = {
-    ...state,
-    leads: state.leads.filter(isRealLead),
-    clients: state.clients.filter(isRealClient),
-    tasks: state.tasks.filter((task) => (task.relatedType === "lead" && realLeadIds.has(task.relatedId)) || (task.relatedType === "client" && realClientIds.has(task.relatedId))),
-    interactions: state.interactions.filter((item) => (item.relatedType === "lead" && realLeadIds.has(item.relatedId)) || (item.relatedType === "client" && realClientIds.has(item.relatedId))),
-    proposals: state.proposals.filter((item) => realLeadIds.has(item.relatedLeadId) || realClientIds.has(item.relatedClientId)),
-    documents: state.documents.filter((item) => (item.relatedType === "lead" && realLeadIds.has(item.relatedId)) || (item.relatedType === "client" && realClientIds.has(item.relatedId))),
-    payments: state.payments.filter((payment) => realClientIds.has(payment.clientId)),
-    activityLog: state.activityLog.filter((item) => (item.entityType === "lead" && realLeadIds.has(item.entityId)) || (item.entityType === "client" && realClientIds.has(item.entityId))),
-    alerts: [],
-  };
-  saveState(state);
-  state = applyAutomations(state);
-  render();
-  showToast(`${beforeLeads - state.leads.length} leads demo eliminados. Datos reales conservados.`);
+  const preview = removeDemoRecords(state).removed;
+  const total = Object.values(preview).reduce((sum, value) => sum + value, 0);
+  if (total === 0) {
+    showToast("No hay registros demo que eliminar.");
+    return;
+  }
+  const confirmed = window.confirm(
+    `Se eliminarán ${total} registros demo (leads, clientes y sus tareas, interacciones y propuestas asociadas). ` +
+    "Los registros reales y los creados a mano se conservan. Se guardará una copia previa en este navegador. ¿Continuar?"
+  );
+  if (!confirmed) return;
+  try {
+    const result = clearDemoRecordsSafely(state);
+    state = applyAutomations(result.state);
+    render();
+    showToast(`${result.removed.leads} leads y ${result.removed.clients} clientes demo eliminados. Copia previa: ${result.backupKey}`);
+  } catch (error) {
+    showToast(error.message || "No se pudo eliminar los datos demo.");
+  }
 }
 
 function exportBackup() {
@@ -2072,6 +2087,47 @@ function keyValues(rows) {
 
 function relatedPanel(title, body) {
   return `<article class="panel compact-panel"><div class="panel-header"><h3>${title}</h3></div><div class="stack-list">${body}</div></article>`;
+}
+
+// Agenda comercial del dashboard: próximas acciones por prospecto, tareas
+// vencidas y propuestas enviadas pendientes de respuesta. Usa solo datos del estado.
+function renderCommercialAgenda(currentState) {
+  const now = Date.now();
+  const open = (currentState.leads || []).filter((lead) => !["Cliente ganado", "Perdido"].includes(lead.status));
+  const actions = open
+    .filter((lead) => lead.nextAction || lead.nextActionAt)
+    .sort((a, b) => new Date(a.nextActionAt || 0) - new Date(b.nextActionAt || 0))
+    .slice(0, 6);
+  const overdueTasks = (currentState.tasks || []).filter((task) => task.status !== "Completada" && task.dueDate && new Date(task.dueDate).getTime() < now);
+  const sentProposals = (currentState.proposals || []).filter((proposal) => proposal.status === "Enviada").slice(0, 5);
+  const leadName = (id) => escapeHtml(currentState.leads.find((lead) => lead.id === id)?.companyName || "Sin prospecto");
+
+  return `
+    <section class="two-column commercial-agenda">
+      <article class="panel">
+        <div class="panel-header"><h3>Próximas acciones</h3><span class="muted">${open.length} prospectos abiertos</span></div>
+        ${actions.map((lead) => `
+          <div class="mini-item">
+            <strong>${escapeHtml(lead.companyName)}</strong>
+            <span>${escapeHtml(lead.nextAction || "Sin acción definida")}${lead.nextActionAt ? ` · ${formatDateTime(lead.nextActionAt)}` : ""}</span>
+          </div>`).join("") || emptyText("Sin próximas acciones definidas")}
+      </article>
+      <article class="panel">
+        <div class="panel-header"><h3>Pendientes</h3><span class="muted">${overdueTasks.length} tareas vencidas</span></div>
+        ${overdueTasks.slice(0, 5).map((task) => `
+          <div class="mini-item">
+            <strong>${escapeHtml(task.title || "Tarea")}</strong>
+            <span>Vencida ${formatDate(task.dueDate)}</span>
+          </div>`).join("")}
+        <h4>Propuestas enviadas sin respuesta</h4>
+        ${sentProposals.map((proposal) => `
+          <div class="mini-item">
+            <strong>${leadName(proposal.relatedLeadId)} · ${escapeHtml(proposal.plan || "")}</strong>
+            <span>${formatCurrency(proposal.price)} · caduca ${formatDate(proposal.expiresAt)}</span>
+          </div>`).join("") || emptyText("Sin propuestas pendientes")}
+      </article>
+    </section>
+  `;
 }
 
 function renderProposalMini(proposal) {
