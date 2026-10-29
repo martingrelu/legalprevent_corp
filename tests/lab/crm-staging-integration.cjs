@@ -1,9 +1,15 @@
 // Integración LP-CRM-002 contra el proyecto de STAGING. Nunca producción.
-// Uso: STAGING_ANON_KEY=... STAGING_EMAIL=... STAGING_PASSWORD=... node tests/lab/crm-staging-integration.cjs
-// Ver docs/crm-staging-integracion.md. Las credenciales se leen del entorno, nunca se guardan.
+//   STAGING_ANON_KEY=... STAGING_EMAIL=... STAGING_PASSWORD=... node tests/lab/crm-staging-integration.cjs
+// Procedimiento completo: docs/crm-staging-integracion.md. Las credenciales solo viven en el entorno.
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.resolve(__dirname, "../..");
 const PRODUCTION_REF = "wtpfrlsbfishvworjdtr";
 const STAGING_URL = "https://ubyopnnfmajmrqhkapjk.supabase.co";
-const CRM_BASE = process.env.CRM_BASE || "http://127.0.0.1:8765/crm/index.html";
+const PORT = Number(process.env.CRM_PORT || 8766);
+const RESULTS_DIR = process.env.RESULTS_DIR || path.join(ROOT, "crm-staging-results");
 
 function assertStagingTarget(env = process.env) {
   const url = env.STAGING_URL || STAGING_URL;
@@ -14,52 +20,152 @@ function assertStagingTarget(env = process.env) {
   return { url, anonKey: env.STAGING_ANON_KEY };
 }
 
-// Solo tras pasar la guardia: configura el navegador de prueba y bloquea cualquier otro Supabase.
-async function configureRouting(context, target) {
-  const configJs = `window.LEGAL_PREVENT_SUPABASE = ${JSON.stringify({ url: target.url, anonKey: target.anonKey })};`;
-  await context.route("**/supabase-config.js*", (route) =>
-    route.fulfill({ status: 200, contentType: "application/javascript", body: configJs }),
-  );
-  await context.route("**/*.supabase.co/**", (route) => {
-    if (route.request().url().startsWith(target.url + "/")) return route.continue();
-    return route.abort();
+// Servidor estático mínimo sobre la raíz del repositorio (no depende de herramientas externas).
+function startStaticServer() {
+  const types = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".woff2": "font/woff2" };
+  const server = http.createServer((req, res) => {
+    const file = path.join(ROOT, decodeURIComponent(new URL(req.url, "http://x").pathname));
+    if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      res.writeHead(404).end("not found");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream" });
+    fs.createReadStream(file).pipe(res);
   });
+  return new Promise((resolve) => server.listen(PORT, "127.0.0.1", () => resolve(server)));
 }
+
+// Copia de prueba: solo registros reales ficticios (.test). Ningún dato de producción.
+const FIXTURE = {
+  app: "LegalPrevent CRM",
+  data: {
+    clients: [{ id: "cli-prueba-1", businessName: "Cliente Prueba SL", taxId: "B00000000", primaryContact: "Contacto Prueba", email: "cliente@prueba.test", plan: "Pyme" }],
+    tasks: [{ id: "tar-prueba-1", title: "Llamada de prueba", relatedType: "client", relatedId: "cli-prueba-1" }],
+    interactions: [{ id: "int-prueba-1", relatedType: "client", relatedId: "cli-prueba-1", kind: "Nota manual", summary: "Prueba de integración" }],
+    proposals: [{ id: "pro-prueba-1", relatedClientId: "cli-prueba-1", plan: "Pyme", price: 99 }],
+  },
+};
+const EXPECTED_REMOTE = 4;
 
 async function main() {
   const target = assertStagingTarget();
   const { chromium } = require("playwright");
+  const server = await startStaticServer();
+  const crmBase = `http://127.0.0.1:${PORT}/crm/index.html`;
   const browser = await chromium.launch();
   const context = await browser.newContext();
-  await configureRouting(context, target);
+
+  // Protección: la configuración de producción se sustituye y cualquier otro Supabase se bloquea.
+  const configJs = `window.LEGAL_PREVENT_SUPABASE = ${JSON.stringify({ url: target.url, anonKey: target.anonKey })};`;
+  await context.route("**/supabase-config.js*", (route) => route.fulfill({ status: 200, contentType: "application/javascript", body: configJs }));
+  await context.route("**/*.supabase.co/**", (route) =>
+    route.request().url().startsWith(target.url + "/") ? route.continue() : route.abort(),
+  );
+
   const page = await context.newPage();
   const pageErrors = [];
+  const dialogs = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("dialog", (dialog) => { dialogs.push(dialog.message()); dialog.accept(); });
 
-  // 1. Autenticación con el formulario real del CRM.
-  await page.goto(CRM_BASE, { waitUntil: "load" });
-  await page.fill("form[data-form='supabase-login'] input[name='email']", process.env.STAGING_EMAIL);
-  await page.fill("form[data-form='supabase-login'] input[name='password']", process.env.STAGING_PASSWORD);
-  await page.click("form[data-form='supabase-login'] button[type='submit']");
-  await page.waitForSelector("[data-sync-status]", { timeout: 20000 });
-  console.log("OK  autenticación: el administrador ve el panel");
+  const results = [];
+  const check = (name, ok, detail = "") => {
+    results.push({ name, ok: Boolean(ok), detail });
+    console.log(`${ok ? "OK  " : "FAIL"} ${name}${detail ? ` — ${detail}` : ""}`);
+  };
+  const remoteRows = () =>
+    page.evaluate(async (url) => {
+      const session = window.LegalPreventSupabase.getSession();
+      const res = await fetch(`${url}/rest/v1/crm_records?select=kind,local_id`, {
+        headers: { apikey: window.LEGAL_PREVENT_SUPABASE.anonKey, Authorization: `Bearer ${session.access_token}` },
+      });
+      return res.ok ? { status: res.status, rows: await res.json() } : { status: res.status, rows: [] };
+    }, target.url);
+  const toast = () => page.textContent("#toast");
+  const syncHeader = () => page.textContent("[data-sync-status]");
+  const importFixture = async () => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: 15000 }),
+      page.click("[data-action='import-cloud-backup']"),
+    ]);
+    await chooser.setFiles({ name: "copia-prueba.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(FIXTURE)) });
+  };
 
-  // 2. Permisos: la clave anónima no puede leer crm_records (lectura sin sesión).
-  const anon = await fetch(`${target.url}/rest/v1/crm_records?select=id&limit=1`, {
-    headers: { apikey: target.anonKey, Authorization: `Bearer ${target.anonKey}` },
-  });
-  const anonBody = await anon.text();
-  console.log(`${anon.status === 200 && anonBody !== "[]" ? "FAIL" : "OK  "} permisos: la clave anónima no lee crm_records (HTTP ${anon.status})`);
+  try {
+    // 1. Autenticación con el formulario real del CRM (usuario de staging con crm_role = admin).
+    await page.goto(crmBase, { waitUntil: "load" });
+    await page.fill("form[data-form='supabase-login'] input[name='email']", process.env.STAGING_EMAIL);
+    await page.fill("form[data-form='supabase-login'] input[name='password']", process.env.STAGING_PASSWORD);
+    await page.click("form[data-form='supabase-login'] button[type='submit']");
+    await page.waitForSelector("[data-sync-status]", { timeout: 20000 });
+    check("autenticación: el administrador entra y ve el panel", true);
 
-  // 3-5. Persistencia, lectura, importación repetida: se completan con la copia de prueba
-  // (ver docs/crm-staging-integracion.md, sección 5). Aquí se cargan los pasos 3 a 7 con la misma
-  // lógica que la prueba del navegador ya validada en local.
-  console.log("PEND persistencia/lectura/importación repetida/fallo de red/recuperación: requieren la copia ficticia de staging (sección 5, pasos 3-7).");
-  console.log("PEND eliminación y retirada de consentimiento: requieren un lead real de staging (sección 5, paso 8).");
+    // 2. Permisos: sin sesión (solo clave anónima) no se leen filas de crm_records.
+    const anon = await fetch(`${target.url}/rest/v1/crm_records?select=id&limit=5`, {
+      headers: { apikey: target.anonKey, Authorization: `Bearer ${target.anonKey}` },
+    });
+    const anonRows = anon.ok ? await anon.json() : [];
+    check("permisos: la clave anónima no lee crm_records", !(anon.ok && anonRows.length > 0), `HTTP ${anon.status}, filas ${anonRows.length}`);
 
-  if (pageErrors.length) console.log(`FAIL errores de página: ${pageErrors.join(" | ")}`);
-  await browser.close();
-  process.exit(pageErrors.length ? 1 : 0);
+    // 3. Persistencia: importar la copia ficticia confirma 4 registros en la nube.
+    await importFixture();
+    await page.waitForFunction(() => /Confirmado por Supabase/.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 20000 });
+    check("persistencia: importación confirmada por Supabase", /4 nuevos/.test(await toast()), (await toast()).trim());
+
+    // 4. Lectura: crm_records devuelve exactamente los registros esperados y con sus tipos.
+    const afterImport = await remoteRows();
+    const kinds = afterImport.rows.map((row) => row.kind).sort().join(",");
+    check("lectura: crm_records contiene los 4 registros esperados", afterImport.rows.length === EXPECTED_REMOTE && kinds === "client,interaction,proposal,task", `filas ${afterImport.rows.length}: ${kinds}`);
+
+    // 5. Importación repetida: no inserta ni duplica nada.
+    await importFixture();
+    await page.waitForFunction(() => /Confirmado por Supabase/.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 20000 });
+    const repeated = await remoteRows();
+    check("importación repetida: 0 nuevos y sin duplicados", /0 nuevos/.test(await toast()) && repeated.rows.length === EXPECTED_REMOTE, `filas ${repeated.rows.length}`);
+
+    // 6. Fallo de red: un cambio local real intenta sincronizar y la petición se corta.
+    // Se añade un cliente real local (no demo) para que haya algo que enviar.
+    await page.evaluate(() => {
+      const raw = JSON.parse(localStorage.getItem("legalprevent-crm-v1"));
+      raw.clients.push({ id: "cli-local-1", businessName: "Cliente local de prueba", taxId: "B11111111", primaryContact: "Local", email: "local@prueba.test", plan: "Pyme" });
+      localStorage.setItem("legalprevent-crm-v1", JSON.stringify(raw));
+    });
+    await page.reload({ waitUntil: "load" });
+    await page.waitForSelector("[data-sync-status]", { timeout: 20000 });
+    await context.route("**/rest/v1/crm_records**", (route) => route.abort());
+    await page.click("[data-action='clear-demo-data']");
+    await page.waitForFunction(() => /No se ha sincronizado|conexión/.test(document.querySelector("[data-sync-status]")?.textContent || ""), null, { timeout: 15000 });
+    const localAfterFailure = await page.evaluate(() => JSON.parse(localStorage.getItem("legalprevent-crm-v1")));
+    check("fallo de red: la cabecera muestra error y el cambio local se conserva", /No se ha sincronizado|conexión/.test(await syncHeader()) && !/Sincronizado con la nube/.test(await syncHeader()) && localAfterFailure.leads.every((lead) => lead.isDemo !== true), (await syncHeader()).trim());
+
+    // 7. Recuperación: restablecer la red y reintentar. La nube conserva lo importado, sin duplicar.
+    await context.unroute("**/rest/v1/crm_records**");
+    await page.click("[data-action='retry-cloud-sync']");
+    await page.waitForFunction(() => /Sincronizado con la nube/.test(document.querySelector("[data-sync-status]")?.textContent || ""), null, { timeout: 20000 });
+    const recovered = await remoteRows();
+    check("recuperación: sincronizado; la nube tiene los 4 importados más el cliente local, sin duplicados", recovered.rows.length === EXPECTED_REMOTE + 1, `filas ${recovered.rows.length}`);
+
+    // 8. Retirada de consentimiento y eliminación a nivel de función: idempotencia y estados.
+    const unknown = await page.evaluate(() => window.LegalPreventSupabase.withdrawCommercialConsent("00000000-0000-0000-0000-000000000000"));
+    check("retirada: un lead inexistente devuelve not_found (la UI no lo trata como éxito)", unknown.status === "not_found", JSON.stringify(unknown));
+    const erase1 = await page.evaluate(() => window.LegalPreventSupabase.eraseContact("nadie@prueba.test", "prueba de integración"));
+    const erase2 = await page.evaluate(() => window.LegalPreventSupabase.eraseContact("nadie@prueba.test", "prueba de integración"));
+    check("eliminación: repetirla no cambia el resultado", erase1.leads_deleted === 0 && erase2.leads_deleted === 0, `${JSON.stringify(erase1)} / ${JSON.stringify(erase2)}`);
+    console.log("PEND fallo parcial en UI (Supabase confirma y el guardado local falla) para eliminación y retirada: requiere un lead real de staging y se verifica a mano según docs/crm-staging-integracion.md.");
+
+    check("sin errores de página", pageErrors.length === 0, pageErrors.join(" | "));
+  } catch (error) {
+    check("ejecución completa sin excepciones", false, error.message);
+  } finally {
+    fs.mkdirSync(RESULTS_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(RESULTS_DIR, "panel.png"), fullPage: true }).catch(() => {});
+    fs.writeFileSync(path.join(RESULTS_DIR, "resultados.json"), JSON.stringify({ target: target.url, when: new Date().toISOString(), results, pageErrors, dialogs }, null, 2));
+    await browser.close();
+    server.close();
+  }
+  const failed = results.filter((item) => !item.ok).length;
+  console.log(`\nRESULTADO: ${results.length - failed}/${results.length} comprobaciones correctas. Resultados en ${RESULTS_DIR}`);
+  process.exit(failed ? 1 : 0);
 }
 
 if (require.main === module) {

@@ -1,76 +1,65 @@
-# LP-CRM-002: validación de integración en staging
+# LP-CRM-002 · Integración en staging (procedimiento único)
 
-Entorno de prueba: proyecto `ubyopnnfmajmrqhkapjk` (staging).
-Producción `wtpfrlsbfishvworjdtr`: **prohibido** en cualquier ejecución de esta guía.
+Proyecto de prueba: `ubyopnnfmajmrqhkapjk`. Producción `wtpfrlsbfishvworjdtr`: **prohibido** en cualquier paso.
 
-## 1. Dependencias SQL (solo en staging, en este orden)
+## Paso 1 · Generar el paquete SQL (local, sin red)
 
-Ejecutar en el SQL Editor del proyecto de staging, sin tocar producción:
+    tools/crm-staging-bundle.sh
 
-1. `supabase/schema.sql` (leads, diagnostics)
-2. `supabase/migrations/20260815_enable_crm_manual_leads.sql`
-3. `supabase/migrations/20260923_add_lead_funnel_fields.sql`
-4. `supabase/migrations/20260925_public_limits_consent.sql` (esquema `private`, consentimiento)
-5. `supabase/migrations/20260925_crm_admin_policies.sql` (`is_crm_admin()`)
-6. `supabase/migrations/20260927_retention_erasure.sql` (eliminación y retirada de consentimiento)
-7. `supabase/migrations/20261029_crm_operativa_preparada.sql` (`crm_records`, RLS)
+Genera `supabase/staging/crm-staging-install.sql` con el conjunto mínimo del CRM, en este orden:
 
-No ejecutar agente, Stripe, checkout ni el resto de migraciones: no son necesarios para el CRM.
-Si una migración falla por dependencia, el error de SQL indica cuál falta; detenerse ahí.
+1. `schema.sql` (leads, diagnostics; incluye tablas de pagos que comparten el esquema base)
+2. `20260815_enable_crm_manual_leads.sql` (alta de leads desde el CRM)
+3. `20260923_add_lead_funnel_fields.sql` (campos del embudo)
+4. `20260924_lead_notification_claim.sql` (`demo_requested_at`, lo lee el CRM)
+5. `20260925_crm_admin_policies.sql` (`is_crm_admin()`)
+6. `20260925_public_limits_consent.sql` (consentimiento; incluye también funciones del formulario público, sin uso en el CRM)
+7. `20260927_retention_erasure.sql` (eliminación y retirada de consentimiento)
+8. `20261029_crm_operativa_preparada.sql` (`crm_records`, RLS)
 
-## 2. Rol administrador del usuario de staging
+Verificado en un PostgreSQL 16 desechable: el paquete se aplica de principio a fin y crea `leads`, `diagnostics`, `crm_records` y las cuatro funciones del CRM.
 
-El usuario de prueba debe tener `app_metadata.crm_role = 'admin'`. Ejecutar en staging, sustituyendo el email de prueba:
+**Corrección y motivo.** La migración `20260927` falla tal cual: en sus funciones SQL, `l.created_at` debe escribirse `(l).created_at`. El generador aplica esa corrección solo al paquete, comprobando que el texto encaja exactamente una vez. **El archivo original no se modifica.** Antes de aplicar la migración en producción, esta corrección debe decidirse aparte.
 
-```sql
-update auth.users
-   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"crm_role":"admin"}'::jsonb
- where email = 'EMAIL_DE_PRUEBA_STAGING';
+No se ejecutan agente comercial, Stripe, checkout ni el resto de migraciones.
 
-select email, raw_app_meta_data->>'crm_role' as crm_role from auth.users where email = 'EMAIL_DE_PRUEBA_STAGING';
-```
+## Paso 2 · Una única acción en Supabase (la tuya)
 
-El resultado debe mostrar `admin`. Hay que cerrar y volver a abrir sesión para que el JWT lo incluya.
-No se modifica el método de autenticación ni el usuario habitual.
+En el SQL Editor del proyecto `ubyopnnfmajmrqhkapjk` (comprueba en la URL del editor que es ese proyecto), pega y ejecuta **el contenido completo** de `supabase/staging/crm-staging-install.sql`.
 
-## 3. Configuración de prueba (sin tocar el repositorio)
+Después, con el email de prueba de staging, ejecuta:
 
-`supabase-config.js` apunta a producción. El runner lo sustituye en el navegador de prueba mediante interceptación de peticiones.
-Variables de entorno, definidas solo en la terminal de quien ejecuta, nunca en el repositorio:
+    update auth.users
+       set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"crm_role":"admin"}'::jsonb
+     where email = 'EMAIL_DE_PRUEBA_STAGING';
 
-- `STAGING_URL=https://ubyopnnfmajmrqhkapjk.supabase.co`
-- `STAGING_ANON_KEY` (clave pública del proyecto de staging)
-- `STAGING_EMAIL` y `STAGING_PASSWORD` (usuario de prueba; se pasan solo en la terminal)
+Cierra y vuelve a abrir la sesión del CRM para que el JWT incluya el rol.
 
-## 4. Protecciones contra producción
+## Paso 3 · Ejecución de la integración (automática)
 
-El runner `tests/lab/crm-staging-integration.cjs` se detiene antes de cualquier petición si:
+Define estas variables solo en tu terminal (nunca en el repositorio):
 
+    STAGING_ANON_KEY=...    # clave pública del proyecto de staging (Settings → API)
+    STAGING_EMAIL=...       # usuario de prueba de staging
+    STAGING_PASSWORD=...    # su contraseña
+
+Luego: `node tests/lab/crm-staging-integration.cjs`
+
+El runner levanta el CRM en local, sustituye la configuración del navegador de prueba por la de staging y bloquea cualquier otra petición a `*.supabase.co`. Escenarios: autenticación, permisos con clave anónima, persistencia, lectura, importación repetida, fallo de red, recuperación y funciones de retirada y eliminación. Escribe `crm-staging-results/resultados.json` y una captura fuera del control de versiones.
+
+## Protecciones contra producción
+
+El runner se detiene antes de cualquier petición si:
 - `STAGING_URL` no es exactamente `https://ubyopnnfmajmrqhkapjk.supabase.co`;
 - la URL contiene `wtpfrlsbfishvworjdtr`;
-- falta la clave de staging.
+- falta la clave anónima o las credenciales de staging.
 
-Durante la ejecución, cualquier petición a `*.supabase.co` que no sea staging se bloquea.
+El generador de SQL también aborta si el paquete contiene la referencia de producción.
 
-## 5. Batería de integración (una sola ejecución)
+## Pendiente de verificación manual
 
-1. **Autenticación**: el administrador entra con el formulario real del CRM y ve el panel.
-2. **Permisos**: la clave anónima no puede leer `crm_records`.
-3. **Persistencia**: importar una copia con datos reales ficticios (`.test`) → "Confirmado por Supabase: N nuevos".
-4. **Lectura**: `crm_records` devuelve los N registros con `kind` y `local_id` correctos.
-5. **Importación repetida**: repetir la misma importación → "0 nuevos", sin duplicados en la tabla.
-6. **Fallo de red**: interceptar `crm_records` con un corte durante un cambio → la cabecera muestra error y el estado local no cambia.
-7. **Recuperación**: restablecer la red y reintentar → "Sincronizado", recuento remoto igual al esperado.
-8. **Eliminación y retirada**: sobre un lead creado en staging, retirada de consentimiento (dos veces) y eliminación; comprobar que el reintento no restaura consentimiento ni duplica entradas de auditoría de forma inesperada.
+Fallo parcial **en la interfaz** al eliminar o retirar consentimiento (la nube confirma y el guardado local falla): requiere un lead real de staging creado por el formulario. El runner comprueba las funciones, no esa ruta de la interfaz.
 
-## 6. Conservación de resultados y retirada
+## Limpieza
 
-- Guardar en una carpeta fechada fuera del repositorio: capturas, registro de peticiones, recuentos antes y después, commit usado (`223d9bb` o posterior) y URL usada.
-- Borrar el proyecto de staging desde su panel solo tras confirmación. No tocar producción.
-- Confirmar que `supabase-config.js` del repositorio sigue apuntando a producción sin cambios.
-
-## 7. Qué debe hacer la persona que ejecuta
-
-1. Crear el usuario de prueba y aplicar la sección 2.
-2. Exportar `STAGING_ANON_KEY`, `STAGING_EMAIL` y `STAGING_PASSWORD` en su terminal.
-3. Ejecutar `node tests/lab/crm-staging-integration.cjs`.
+Tras la ejecución, guarda `crm-staging-results/` fuera del repositorio y borra el proyecto de staging solo tras tu confirmación. No se toca producción.
