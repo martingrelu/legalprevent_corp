@@ -1,6 +1,26 @@
--- LP-CRM-002 · instalación mínima en STAGING (proyecto ubyopnnfmajmrqhkapjk).
--- NO ejecutar en el proyecto de producción. Generado por tools/crm-staging-bundle.sh.
+-- LP-CRM-002 · instalación mínima SOLO para el proyecto de staging ubyopnnfmajmrqhkapjk.
+-- No ejecutar en ningún otro proyecto. Generado por tools/crm-staging-bundle.sh.
 begin;
+
+-- Protección: el paquete solo se instala en un proyecto de staging VACÍO.
+do $guard$
+declare
+  r record;
+  n bigint;
+  busy text[] := '{}';
+begin
+  for r in select schemaname, tablename from pg_tables where schemaname in ('public', 'private') loop
+    continue when r.schemaname = 'private' and r.tablename in ('settings', 'consent_versions');
+    execute format('select count(*) from %I.%I', r.schemaname, r.tablename) into n;
+    if n > 0 then
+      busy := busy || format('%I.%I (%s filas)', r.schemaname, r.tablename, n);
+    end if;
+  end loop;
+  if array_length(busy, 1) > 0 then
+    raise exception 'Protección: la base contiene datos existentes (%). Este paquete solo se instala en un proyecto de staging vacío.', array_to_string(busy, ', ');
+  end if;
+end
+$guard$;
 
 -- ===== supabase/schema.sql =====
 create extension if not exists pgcrypto;
@@ -1114,35 +1134,7 @@ begin
 end;
 $$;
 
--- ---------------------------------------------------------------------------
--- 5. Datos existentes (sin borrar nada)
--- ---------------------------------------------------------------------------
--- Leads captados con PR0 (desde su despliegue, 2026-09-24 19:00 UTC): el
--- servidor ya exigía la privacidad con la política 2026-06-04.
-update public.leads
-   set privacy_accepted_at = created_at,
-       privacy_policy_version = '2026-06-04'
- where privacy_accepted
-   and privacy_accepted_at is null
-   and created_at >= timestamptz '2026-09-24 19:00:00+00';
-update public.leads
-   set commercial_consent_at = created_at,
-       commercial_consent_version = '2026-06-04'
- where commercial_consent
-   and commercial_consent_at is null
-   and created_at >= timestamptz '2026-09-24 19:00:00+00';
-insert into private.consent_events (lead_id, kind, action, version, source, occurred_at)
-select l.id, 'privacy', 'granted', '2026-06-04', 'backfill_pr0', l.created_at
-  from public.leads l
- where l.privacy_accepted_at is not null
-   and l.created_at >= timestamptz '2026-09-24 19:00:00+00'
-   and not exists (select 1 from private.consent_events e where e.lead_id = l.id and e.kind = 'privacy');
-
--- Resto: sin prueba de fecha ni versión → revisión jurídica.
-update public.leads
-   set privacy_review_required = true
- where privacy_accepted_at is null
-   and not privacy_review_required;
+-- Backfill de datos históricos omitido en el paquete de staging.
 
 -- Vista para la revisión jurídica (aplica la RLS de leads: solo CRM admin).
 create or replace view public.leads_privacy_review
