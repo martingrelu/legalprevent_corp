@@ -19,7 +19,7 @@ Genera `supabase/staging/crm-staging-install.sql` con el conjunto mínimo del CR
 
 Verificado en un PostgreSQL 16 desechable: el paquete se aplica de principio a fin y crea `leads`, `diagnostics`, `crm_records` y las cuatro funciones del CRM.
 
-**Corrección y motivo.** La migración `20260927` falla tal cual: en sus funciones SQL, `l.created_at` debe escribirse `(l).created_at`. El generador aplica esa corrección solo al paquete, comprobando que el texto encaja exactamente una vez. **El archivo original no se modifica.** Antes de aplicar la migración en producción, esta corrección debe decidirse aparte.
+**Nota sobre `20260927`.** La migración original se aplica sin error en PostgreSQL 16 (comprobado con la cadena completa de migraciones y con pruebas funcionales de retirada, eliminación y conservación desactivada). La reescritura `(l).created_at` que hace el generador es cosmética y no es necesaria; el archivo original no se modifica.
 
 No se ejecutan agente comercial, Stripe, checkout ni el resto de migraciones.
 

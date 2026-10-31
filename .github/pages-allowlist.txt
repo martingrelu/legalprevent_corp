@@ -32,6 +32,7 @@ crm/src/csvImport.js
 crm/src/demoData.js
 crm/src/models.js
 crm/src/store.js
+crm/src/sync.js
 crm/src/styles.css
 # Batería que carga el laboratorio del CRM (misma ruta que hoy)
 docs/pr2/eval/bateria-v1.json
