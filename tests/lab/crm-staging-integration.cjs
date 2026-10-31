@@ -45,7 +45,8 @@ const FIXTURE = {
     proposals: [{ id: "pro-prueba-1", relatedClientId: "cli-prueba-1", plan: "Pyme", price: 99 }],
   },
 };
-const EXPECTED_REMOTE = 4;
+const EXPECTED_IMPORT = 4;
+const FIXTURE_KEYS = ["client:cli-prueba-1", "task:tar-prueba-1", "interaction:int-prueba-1", "proposal:pro-prueba-1"];
 
 async function main() {
   const target = assertStagingTarget();
@@ -110,18 +111,21 @@ async function main() {
     // 3. Persistencia: importar la copia ficticia confirma 4 registros en la nube.
     await importFixture();
     await page.waitForFunction(() => /Confirmado por Supabase/.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 20000 });
-    check("persistencia: importación confirmada por Supabase", /4 nuevos/.test(await toast()), (await toast()).trim());
+    // Idempotente entre ejecuciones: nuevos + ya existentes deben sumar los 4 registros de la copia.
+    const m = (await toast()).match(/(\d+) nuevos y (\d+) ya existían/);
+    check("persistencia: importación confirmada por Supabase (4 registros de la copia)", Boolean(m) && Number(m[1]) + Number(m[2]) === EXPECTED_IMPORT, (await toast()).trim());
 
     // 4. Lectura: crm_records devuelve exactamente los registros esperados y con sus tipos.
     const afterImport = await remoteRows();
-    const kinds = afterImport.rows.map((row) => row.kind).sort().join(",");
-    check("lectura: crm_records contiene los 4 registros esperados", afterImport.rows.length === EXPECTED_REMOTE && kinds === "client,interaction,proposal,task", `filas ${afterImport.rows.length}: ${kinds}`);
+    const keys = new Set(afterImport.rows.map((row) => `${row.kind}:${row.local_id}`));
+    const missing = FIXTURE_KEYS.filter((key) => !keys.has(key));
+    check("lectura: crm_records contiene los 4 registros de la copia", missing.length === 0, missing.length ? `faltan ${missing.join(", ")}` : `filas ${afterImport.rows.length}`);
 
     // 5. Importación repetida: no inserta ni duplica nada.
     await importFixture();
     await page.waitForFunction(() => /Confirmado por Supabase/.test(document.querySelector("#toast")?.textContent || ""), null, { timeout: 20000 });
     const repeated = await remoteRows();
-    check("importación repetida: 0 nuevos y sin duplicados", /0 nuevos/.test(await toast()) && repeated.rows.length === EXPECTED_REMOTE, `filas ${repeated.rows.length}`);
+    check("importación repetida: 0 nuevos y sin duplicados", /0 nuevos/.test(await toast()) && new Set(repeated.rows.map((row) => `${row.kind}:${row.local_id}`)).size === repeated.rows.length, `filas ${repeated.rows.length}`);
 
     // 6. Fallo de red: un cambio local real intenta sincronizar y la petición se corta.
     // Se añade un cliente real local (no demo) para que haya algo que enviar.
@@ -143,7 +147,8 @@ async function main() {
     await page.click("[data-action='retry-cloud-sync']");
     await page.waitForFunction(() => /Sincronizado con la nube/.test(document.querySelector("[data-sync-status]")?.textContent || ""), null, { timeout: 20000 });
     const recovered = await remoteRows();
-    check("recuperación: sincronizado; la nube tiene los 4 importados más el cliente local, sin duplicados", recovered.rows.length === EXPECTED_REMOTE + 1, `filas ${recovered.rows.length}`);
+    const uniqueKeys = new Set(recovered.rows.map((row) => `${row.kind}:${row.local_id}`));
+    check("recuperación: sincronizado y sin duplicados (cliente local presente)", uniqueKeys.size === recovered.rows.length && uniqueKeys.has("client:cli-local-1"), `filas ${recovered.rows.length}`);
 
     // 8. Retirada de consentimiento y eliminación a nivel de función: idempotencia y estados.
     const unknown = await page.evaluate(() => window.LegalPreventSupabase.withdrawCommercialConsent("00000000-0000-0000-0000-000000000000"));
