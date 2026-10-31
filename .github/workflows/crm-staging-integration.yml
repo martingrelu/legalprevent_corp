@@ -1,0 +1,61 @@
+# Integración LP-CRM-002 contra el proyecto de STAGING (ubyopnnfmajmrqhkapjk). Nunca producción.
+# Se lanza manualmente: añade la etiqueta «run-staging-integration» al PR, o usa «Run workflow».
+# Credenciales: secretos STAGING_ANON_KEY, STAGING_EMAIL y STAGING_PASSWORD. No se imprimen.
+name: CRM staging integration
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crm-staging-integration
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'run-staging-integration' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Código del PR
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Playwright fuera del repositorio (sin tocar package.json)
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw"
+          cd "$RUNNER_TEMP/pw"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.47.2
+          npx playwright install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
+
+      - name: Integración contra staging
+        env:
+          STAGING_URL: https://ubyopnnfmajmrqhkapjk.supabase.co
+          STAGING_ANON_KEY: ${{ secrets.STAGING_ANON_KEY }}
+          STAGING_EMAIL: ${{ secrets.STAGING_EMAIL }}
+          STAGING_PASSWORD: ${{ secrets.STAGING_PASSWORD }}
+        run: node tests/lab/crm-staging-integration.cjs
+
+      - name: Resultados (sin capturas ni credenciales)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crm-staging-results
+          path: crm-staging-results/resultados.json
+          if-no-files-found: warn
+          retention-days: 7
