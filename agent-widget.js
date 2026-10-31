@@ -19,7 +19,7 @@
   root.LegalPreventAgentWidget = api;
   if (root.document) api.boot(root);
 })(typeof window !== "undefined" ? window : globalThis, function () {
-  const PUBLIC_LAUNCHER = true;
+  const PUBLIC_LAUNCHER = false;
   const PREVIEW_HASH = "#agente-preview";
   // Modelo para la vista previa con sesión de administrador (en modo público lo
   // decide siempre el servidor y este valor se ignora).
