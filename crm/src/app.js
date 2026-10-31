@@ -94,6 +94,13 @@ const cloudSync = createSyncController({
     if (element) {
       element.textContent = status.message;
       element.className = `sync-status ${status.state}`;
+      // El botón «Reintentar» depende del estado; el callback no re-renderiza la cabecera.
+      const retry = element.parentElement?.querySelector("[data-action='retry-cloud-sync']");
+      if (status.state === "error" && !retry) {
+        element.insertAdjacentHTML("afterend", '<button class="small-button" data-action="retry-cloud-sync">Reintentar</button>');
+      } else if (status.state !== "error" && retry) {
+        retry.remove();
+      }
     }
   },
 });
