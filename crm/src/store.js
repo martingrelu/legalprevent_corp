@@ -285,6 +285,26 @@ export function formatDate(value, mode = "short") {
   }).format(date);
 }
 
+// Fecha y hora de recepción en horario de España (cambia solo con el horario de verano).
+// Sin fecha fiable devuelve "Fecha no disponible": nunca sustituye por la fecha actual.
+export function formatReceivedAt(value) {
+  if (!value) return "Fecha no disponible";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Fecha no disponible";
+
+  const parts = new Intl.DateTimeFormat("es-ES", {
+    timeZone: "Europe/Madrid",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type) => parts.find((p) => p.type === type)?.value || "";
+  return `${part("day")}/${part("month")}/${part("year")} · ${part("hour")}:${part("minute")}`;
+}
+
 export function formatDateTime(value) {
   if (!value) return "Sin fecha";
   const date = new Date(value);
@@ -553,6 +573,8 @@ export function leadFromSupabaseRow(row, { existingId = "", defaultOwnerId = "",
     status: row.status || "Nuevo",
     priority: row.priority || "Media",
     createdAt: row.created_at || now,
+    // Fecha de recepción original: solo la fecha guardada en la nube. No se sustituye por la actual.
+    receivedAt: row.created_at || null,
     lastInteractionAt: row.created_at || now,
     leadType: row.lead_type || "",
     zone: row.zone || "",

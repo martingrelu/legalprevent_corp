@@ -28,6 +28,7 @@ import {
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatReceivedAt,
   getCurrentUser,
   getEntityName,
   importBackup,
@@ -514,6 +515,7 @@ function renderLeads() {
             <tr>
               <th>Empresa</th>
               <th>Contacto</th>
+              <th>Recibido</th>
               <th>Estado</th>
               <th>Prioridad</th>
               <th>Fuente</th>
@@ -634,6 +636,7 @@ function renderLeadTableRow(lead) {
         ${renderLeadFlags(lead)}
       </td>
       <td>${escapeHtml(lead.contactName)}<small>${escapeHtml(lead.email)}</small></td>
+      <td>${escapeHtml(formatReceivedAt(lead.receivedAt))}</td>
       <td>${badge(lead.status)}</td>
       <td>${badge(lead.priority, `priority-${lead.priority.toLowerCase()}`)}</td>
       <td>${escapeHtml(lead.source)}</td>
@@ -754,7 +757,7 @@ function renderLeadDetail(id) {
             ["Ciudad/provincia", lead.city],
             ["Fuente", lead.source],
             ["Responsable", owner?.name || "Sin asignar"],
-            ["Creacion", formatDate(lead.createdAt)],
+            ["Fecha de recepción", formatReceivedAt(lead.receivedAt)],
             ["Ultima interaccion", formatDateTime(lead.lastInteractionAt)],
             ["Tipo de lead", optionLabel(LEAD_TYPES, lead.leadType) || "Sin definir"],
             ["Zona", lead.zone || "Sin definir"],
