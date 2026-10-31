@@ -19,7 +19,9 @@ import {
   buildAlerts,
   canAccess,
   convertLeadToClient,
+  clearDemoRecordsSafely,
   createBackup,
+  removeDemoRecords,
   dashboardMetrics,
   filteredClients,
   filteredLeads,
@@ -49,12 +51,68 @@ import {
   validateLead,
   upsertProposal,
   upsertTask,
-} from "./store.js?v=20261026-lpweb1";
+  hasRealLink,
+  isDemoRecord,
+  isPersistenceBlocked,
+  onStateSaved,
+  onStateSaveError,
+  CONSENT_WITHDRAWAL_CONFIRMED,
+  withdrawConsentLocally,
+} from "./store.js?v=20261029-crm2";
 import { CSV_LEAD_FIELDS, createLeadFormData, csvTemplate, mapCsvRow, parseCsv, suggestMapping } from "./csvImport.js?v=20261002-1";
+import { createSyncController, LOCAL_ONLY_MESSAGE, planImport, writeRows } from "./sync.js?v=20261029-crm2";
 
 let state = applyAutomations(loadState());
 let view = parseRoute();
 let toastTimer = null;
+
+// ---- Estado de sincronización visible ----
+// Cada guardado local pasa por aquí. Solo se muestra "sincronizado" cuando la nube lo confirma.
+let cloudStatus = { state: "local", message: LOCAL_ONLY_MESSAGE, error: "" };
+
+function cloudAuth() {
+  try {
+    const session = window.LegalPreventSupabase?.getSession?.();
+    const config = window.LEGAL_PREVENT_SUPABASE || {};
+    if (!session?.access_token || !config.url || !config.anonKey) return null;
+    return {
+      baseUrl: String(config.url).trim().replace(/\/$/, ""),
+      anonKey: String(config.anonKey).trim(),
+      accessToken: session.access_token,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const cloudSync = createSyncController({
+  getAuth: cloudAuth,
+  isOnline: () => navigator.onLine !== false,
+  onStatus: (status) => {
+    cloudStatus = status;
+    const element = document.querySelector("[data-sync-status]");
+    if (element) {
+      element.textContent = status.message;
+      element.className = `sync-status ${status.state}`;
+      // El botón «Reintentar» depende del estado; el callback no re-renderiza la cabecera.
+      const retry = element.parentElement?.querySelector("[data-action='retry-cloud-sync']");
+      if (status.state === "error" && !retry) {
+        element.insertAdjacentHTML("afterend", '<button class="small-button" data-action="retry-cloud-sync">Reintentar</button>');
+      } else if (status.state !== "error" && retry) {
+        retry.remove();
+      }
+    }
+  },
+});
+
+onStateSaved((savedState) => cloudSync.changed(savedState));
+onStateSaveError((error) => {
+  showToast(`No se ha guardado el cambio: ${error.message}. Exporta una copia antes de seguir.`, "error");
+});
+window.addEventListener("online", () => cloudSync.retry());
+if (isPersistenceBlocked()) {
+  cloudStatus = { state: "error", message: `Guardado bloqueado: ${isPersistenceBlocked()}`, error: "blocked" };
+}
 let csvImportSession = null;
 
 const LEAD_PLAN_PRICES = {
@@ -222,14 +280,17 @@ function renderTopbar(user) {
               .join("")}
           </select>
         </label>
+        <span class="sync-status ${cloudStatus.state}" data-sync-status role="status" aria-live="polite">${escapeHtml(cloudStatus.message)}</span>
+        ${cloudStatus.state === "error" ? `<button class="small-button" data-action="retry-cloud-sync">Reintentar</button>` : ""}
         ${
           supabaseConfigured
             ? supabaseSession
               ? `<button class="secondary-button" data-action="sync-supabase">Sincronizar Supabase</button>
                  <button class="ghost-button" data-action="supabase-logout">Cerrar Supabase</button>`
               : `<button class="secondary-button" data-action="open-supabase-login">Conectar Supabase</button>`
-            : `<span class="sync-status">Supabase pendiente</span>`
+            : ""
         }
+        <button class="secondary-button" data-action="import-cloud-backup">Importar copia a la nube</button>
         <button class="secondary-button" data-action="export-backup">Exportar copia</button>
         <button class="secondary-button" data-action="open-import-backup">Importar copia</button>
         <button class="secondary-button" data-action="open-csv-import">Importar CSV</button>
@@ -301,7 +362,7 @@ function renderDashboard() {
       <section class="data-mode-panel">
         <div>
           <p class="eyebrow">Datos comerciales</p>
-          <h2>${realLeadCount} leads reales sincronizados</h2>
+          <h2>${realLeadCount} leads reales</h2>
           <p>${demoLeadCount ? `${demoLeadCount} leads demo siguen disponibles para pruebas.` : "Dashboard limpio, sin leads demo."}</p>
           ${renderRetentionStatus(state.meta?.retentionPreview)}
         </div>
@@ -322,6 +383,8 @@ function renderDashboard() {
         ${metricCard("Facturacion mensual", formatCurrency(metrics.monthlyRevenue), "MRR estimado")}
         ${metricCard("Conversion", `${metrics.conversionRate}%`, "Lead a cliente")}
       </section>
+
+      ${renderCommercialAgenda(state)}
 
       <section class="two-column">
         <article class="panel chart-panel">
@@ -503,7 +566,7 @@ function renderRetentionStatus(preview) {
 // Supresión y retirada del consentimiento: solo para leads sincronizados con
 // Supabase (el servidor comprueba además que el usuario es administrador).
 function renderPrivacyPanel(lead) {
-  if (!isRealLead(lead) || !lead.supabaseId) return "";
+  if (!hasRealLink(lead) || !lead.supabaseId) return "";
   return `
     <article class="panel">
       <div class="panel-header"><h3>Protección de datos</h3></div>
@@ -1430,7 +1493,7 @@ async function handleSubmit(event) {
       state = applyAutomations(importBackup(backup));
       closeModal();
       render();
-      showToast("Copia importada correctamente.");
+      showToast("Copia importada en este navegador. Aún no está en la nube: usa «Importar copia a la nube» para subirla.");
       return;
     }
 
@@ -1467,9 +1530,25 @@ async function handleSubmit(event) {
       if (typed !== String(lead.email || "").trim().toLowerCase()) {
         throw new Error("El email escrito no coincide con el del lead.");
       }
-      const result = await window.LegalPreventSupabase.eraseContact(lead.email, String(formData.get("reason") || ""));
-      state = removeLeadAndRelated(state, lead.id);
-      saveState(state);
+      let result;
+      try {
+        result = await window.LegalPreventSupabase.eraseContact(lead.email, String(formData.get("reason") || ""));
+      } catch (error) {
+        throw new Error(`No se ha eliminado nada en Supabase y este navegador no se ha modificado. ${error.message || ""}`.trim());
+      }
+      // Remoto confirmado: solo entonces se prepara el estado local. Si el guardado local falla,
+      // el contacto sigue aquí y repetir la eliminación es seguro (idempotente en Supabase).
+      const erasedState = removeLeadAndRelated(state, lead.id);
+      try {
+        saveState(erasedState);
+      } catch (error) {
+        throw new Error(
+          `Supabase confirmó la eliminación (${result.leads_deleted} leads y ${result.diagnostics_deleted} diagnósticos), ` +
+          `pero este navegador no la ha guardado (${error.message}). Discrepancia pendiente: el contacto sigue en este navegador. ` +
+          "Repite la eliminación para completarla; repetirla es seguro.",
+        );
+      }
+      state = erasedState;
       closeModal();
       // El cambio de ruta vuelve a pintar la página (y el aviso) al disparar hashchange.
       window.addEventListener("hashchange", () => {
@@ -1482,18 +1561,40 @@ async function handleSubmit(event) {
     if (formType === "withdraw-consent") {
       const lead = state.leads.find((item) => item.id === form.dataset.id);
       if (!lead?.supabaseId) throw new Error("Lead no encontrado.");
-      const result = await window.LegalPreventSupabase.withdrawCommercialConsent(lead.supabaseId);
-      if (result.status === "withdrawn" || result.status === "not_consented") {
-        Object.assign(lead, { commercialConsent: false, commercialConsentWithdrawnAt: lead.commercialConsentWithdrawnAt || new Date().toISOString() });
-        saveState(state);
+      let result;
+      try {
+        result = await window.LegalPreventSupabase.withdrawCommercialConsent(lead.supabaseId);
+      } catch (error) {
+        throw new Error(`No se ha retirado el consentimiento en Supabase y este navegador no se ha modificado. ${error.message || ""}`.trim());
       }
+      // Solo estos dos estados confirman que el consentimiento está retirado en la nube.
+      // Cualquier otro (p. ej. not_found) no se trata como éxito ni cambia nada local.
+      if (!CONSENT_WITHDRAWAL_CONFIRMED.has(result.status)) {
+        throw new Error(`Supabase no confirmó la retirada (estado: ${result.status || "desconocido"}). Este navegador no se ha modificado.`);
+      }
+      // Nunca se restaura un consentimiento: withdrawConsentLocally solo puede dejarlo en "retirado".
+      const withdrawnState = withdrawConsentLocally(state, lead.id);
+      try {
+        saveState(withdrawnState);
+      } catch (error) {
+        throw new Error(
+          `Supabase confirmó la retirada, pero este navegador no la ha guardado (${error.message}). ` +
+          "Discrepancia pendiente: aquí el lead aparece aún con consentimiento. Repite la retirada: es segura y no restaura nada.",
+        );
+      }
+      state = withdrawnState;
       closeModal();
       render();
-      showToast(result.status === "withdrawn" ? "Consentimiento comercial retirado." : "Este lead ya no tenía consentimiento comercial.");
+      showToast(
+        result.status === "withdrawn"
+          ? "Consentimiento comercial retirado en Supabase y guardado en este navegador."
+          : "El lead ya no tenía consentimiento en Supabase. Estado local confirmado.",
+      );
       return;
     }
 
     const formData = new FormData(form);
+    let remoteConfirmed = false;
     if (formType === "lead") {
       const previousState = state;
       const previousId = form.dataset.id;
@@ -1502,21 +1603,27 @@ async function handleSubmit(event) {
         ? nextState.leads.find((lead) => lead.id === previousId)
         : nextState.leads[0];
 
+      let remoteLead;
       try {
-        const remoteLead = await window.LegalPreventSupabase.saveCrmLead(savedLead);
-        Object.assign(savedLead, {
-          supabaseId: remoteLead.id,
-          dataOrigin: "supabase",
-          externalSource: "supabase",
-          leadOrigin: leadOriginFromRow(remoteLead)
-        });
-        saveState(nextState);
-        state = nextState;
+        remoteLead = await window.LegalPreventSupabase.saveCrmLead(savedLead);
       } catch (error) {
-        saveState(previousState);
+        revertLocalState(previousState);
         state = previousState;
-        throw error;
+        throw new Error(`No se ha guardado en Supabase; el cambio se ha revertido en este navegador. ${error.message}`);
       }
+      Object.assign(savedLead, {
+        supabaseId: remoteLead.id,
+        dataOrigin: "supabase",
+        externalSource: "supabase",
+        leadOrigin: leadOriginFromRow(remoteLead)
+      });
+      try {
+        saveState(nextState);
+      } catch (error) {
+        throw new Error(`Confirmado por Supabase, pero no guardado en este navegador (${error.message}). Exporta una copia y recarga antes de seguir.`);
+      }
+      state = nextState;
+      remoteConfirmed = true;
     }
     if (formType === "task") state = upsertTask(state, formData, form.dataset.id);
     if (formType === "proposal") state = upsertProposal(state, formData, form.dataset.id);
@@ -1525,9 +1632,19 @@ async function handleSubmit(event) {
 
     closeModal();
     render();
-    showToast("Cambios guardados correctamente.");
+    showToast(remoteConfirmed ? "Guardado en Supabase y en este navegador." : "Guardado en este navegador.");
   } catch (error) {
     showToast(error.message, "error");
+  }
+}
+
+// Revierte el estado local tras un fallo. Si el propio guardado falla, el aviso de error ya se muestra
+// desde saveState; aquí solo se evita una excepción sin manejar.
+function revertLocalState(previousState) {
+  try {
+    saveState(previousState);
+  } catch {
+    // Sin efecto adicional: el error original se comunica al usuario.
   }
 }
 
@@ -1547,10 +1664,21 @@ function handleClick(event) {
   if (action === "clear-filters") {
     window.location.hash = `#/${view.name}`;
   }
+  if (action === "retry-cloud-sync") cloudSync.retry();
+  if (action === "import-cloud-backup") importBackupToCloud();
   if (action === "reset-demo") {
-    state = applyAutomations(resetState());
-    render();
-    showToast("Datos demo restaurados.");
+    const confirmed = window.confirm(
+      "Restaurar demo sustituye TODO el contenido del CRM de este navegador por datos de ejemplo. " +
+      "Antes se guardará una copia del estado actual en este navegador. ¿Continuar?"
+    );
+    if (!confirmed) return;
+    try {
+      state = applyAutomations(resetState());
+      render();
+      showToast("Datos demo restaurados. La copia anterior está guardada en este navegador.");
+    } catch (error) {
+      showToast(error.message || "No se pudo restaurar la demo.");
+    }
   }
   if (action === "clear-demo-data") clearDemoData();
   if (action === "export-backup") exportBackup();
@@ -1597,17 +1725,29 @@ function handleClick(event) {
     openModal(renderProposalModal(proposal, button.dataset.relatedType || "lead", button.dataset.relatedId || ""));
   }
   if (action === "convert-lead") {
-    state = convertLeadToClient(state, button.dataset.id);
-    render();
-    showToast("Lead convertido en cliente.");
+    const previousState = state;
+    try {
+      state = convertLeadToClient(state, button.dataset.id);
+      render();
+      showToast("Lead convertido en cliente. Guardado en este navegador.");
+    } catch (error) {
+      state = previousState;
+      showToast(`No se ha convertido el lead. ${error.message || ""}`.trim(), "error");
+    }
   }
   if (action === "accept-proposal") {
     const proposal = state.proposals.find((item) => item.id === button.dataset.id);
     if (proposal) {
-      const formData = proposalToFormData({ ...proposal, status: "Aceptada" });
-      state = upsertProposal(state, formData, proposal.id);
-      render();
-      showToast("Propuesta aceptada y lead convertido.");
+      const previousState = state;
+      try {
+        const formData = proposalToFormData({ ...proposal, status: "Aceptada" });
+        state = upsertProposal(state, formData, proposal.id);
+        render();
+        showToast("Propuesta aceptada y lead convertido. Guardado en este navegador.");
+      } catch (error) {
+        state = previousState;
+        showToast(`No se ha aceptado la propuesta. ${error.message || ""}`.trim(), "error");
+      }
     }
   }
 }
@@ -1775,34 +1915,37 @@ function formatStripeAddress(address = {}) {
   return [address.line1, address.line2, address.postal_code, address.city, address.country].filter(Boolean).join(", ");
 }
 
+// Real = no es un registro de demostración (incluye los creados a mano).
 function isRealLead(lead) {
-  return lead?.dataOrigin === "supabase" || lead?.externalSource === "supabase" || Boolean(lead?.supabaseId);
+  return Boolean(lead) && !isDemoRecord(lead);
 }
 
 function isRealClient(client) {
   return client?.dataOrigin === "stripe" || Boolean(client?.stripeCustomerId) || Boolean(client?.stripeSubscriptionId);
 }
 
+// Solo elimina registros identificados como demo (ver store.js: removeDemoRecords).
+// Antes guarda una copia del estado; si la copia falla, no borra nada.
 function clearDemoData() {
-  const beforeLeads = state.leads.length;
-  const realLeadIds = new Set(state.leads.filter(isRealLead).map((lead) => lead.id));
-  const realClientIds = new Set(state.clients.filter(isRealClient).map((client) => client.id));
-  state = {
-    ...state,
-    leads: state.leads.filter(isRealLead),
-    clients: state.clients.filter(isRealClient),
-    tasks: state.tasks.filter((task) => (task.relatedType === "lead" && realLeadIds.has(task.relatedId)) || (task.relatedType === "client" && realClientIds.has(task.relatedId))),
-    interactions: state.interactions.filter((item) => (item.relatedType === "lead" && realLeadIds.has(item.relatedId)) || (item.relatedType === "client" && realClientIds.has(item.relatedId))),
-    proposals: state.proposals.filter((item) => realLeadIds.has(item.relatedLeadId) || realClientIds.has(item.relatedClientId)),
-    documents: state.documents.filter((item) => (item.relatedType === "lead" && realLeadIds.has(item.relatedId)) || (item.relatedType === "client" && realClientIds.has(item.relatedId))),
-    payments: state.payments.filter((payment) => realClientIds.has(payment.clientId)),
-    activityLog: state.activityLog.filter((item) => (item.entityType === "lead" && realLeadIds.has(item.entityId)) || (item.entityType === "client" && realClientIds.has(item.entityId))),
-    alerts: [],
-  };
-  saveState(state);
-  state = applyAutomations(state);
-  render();
-  showToast(`${beforeLeads - state.leads.length} leads demo eliminados. Datos reales conservados.`);
+  const preview = removeDemoRecords(state).removed;
+  const total = Object.values(preview).reduce((sum, value) => sum + value, 0);
+  if (total === 0) {
+    showToast("No hay registros demo que eliminar.");
+    return;
+  }
+  const confirmed = window.confirm(
+    `Se eliminarán ${total} registros demo (leads, clientes y sus tareas, interacciones y propuestas asociadas). ` +
+    "Los registros reales y los creados a mano se conservan. Se guardará una copia previa en este navegador. ¿Continuar?"
+  );
+  if (!confirmed) return;
+  try {
+    const result = clearDemoRecordsSafely(state);
+    state = applyAutomations(result.state);
+    render();
+    showToast(`${result.removed.leads} leads y ${result.removed.clients} clientes demo eliminados. Copia previa: ${result.backupKey}`);
+  } catch (error) {
+    showToast(error.message || "No se pudo eliminar los datos demo.");
+  }
 }
 
 function exportBackup() {
@@ -1846,14 +1989,16 @@ async function handleChange(event) {
     try {
       state = updateLeadStatus(state, target.dataset.id, target.value);
       const lead = state.leads.find((item) => item.id === target.dataset.id);
-      if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+      if (hasRealLink(lead)) {
+        await window.LegalPreventSupabase.saveCrmLead(lead);
+      }
       render();
-      showToast("Estado actualizado.");
+      showToast(hasRealLink(lead) ? "Estado guardado en Supabase y en este navegador." : "Estado guardado en este navegador.");
     } catch (error) {
       state = previousState;
-      saveState(state);
+      revertLocalState(previousState);
       render();
-      showToast(`No se pudo actualizar el estado: ${error.message}`, "error");
+      showToast(`No se pudo actualizar el estado: ${error.message}. Se ha revertido en este navegador.`, "error");
     }
     return;
   }
@@ -1888,14 +2033,16 @@ async function handleDrop(event) {
   try {
     state = updateLeadStatus(state, leadId, nextStatus);
     const lead = state.leads.find((item) => item.id === leadId);
-    if (isRealLead(lead)) await window.LegalPreventSupabase.saveCrmLead(lead);
+    if (hasRealLink(lead)) {
+      await window.LegalPreventSupabase.saveCrmLead(lead);
+    }
     render();
-    showToast(`Lead movido a ${nextStatus}.`);
+    showToast(hasRealLink(lead) ? `Lead movido a ${nextStatus}: guardado en Supabase y en este navegador.` : `Lead movido a ${nextStatus}: guardado en este navegador.`);
   } catch (error) {
     state = previousState;
-    saveState(state);
+    revertLocalState(previousState);
     render();
-    showToast(`No se pudo mover el lead: ${error.message}`, "error");
+    showToast(`No se pudo mover el lead: ${error.message}. Se ha revertido en este navegador.`, "error");
   }
 }
 
@@ -1996,6 +2143,52 @@ function modal(title, body, extraClass = "") {
   `;
 }
 
+// Importa una copia exportada a la nube. Simula antes, pide confirmación, no sobrescribe
+// nada existente y no modifica ni borra el estado local ni el fichero de copia.
+function importBackupToCloud() {
+  const auth = cloudAuth();
+  if (!auth) {
+    showToast("Conecta Supabase como administrador para importar la copia a la nube.", "error");
+    return;
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "application/json,.json";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      const plan = planImport(backup);
+      if (plan.blocking) {
+        showToast("La copia no es válida: hay registros sin identificador.", "error");
+        return;
+      }
+      if (plan.wouldWrite === 0) {
+        showToast("La copia no contiene registros reales para importar.", "error");
+        return;
+      }
+      const t = plan.report.totals;
+      const summary =
+        `Simulación de importación:\n` +
+        `- Clientes: ${t.client || 0}, tareas: ${t.task || 0}, interacciones: ${t.interaction || 0}, propuestas: ${t.proposal || 0}.\n` +
+        `- Registros reales a importar: ${plan.wouldWrite}.\n` +
+        `- Duplicados dentro del fichero (se omiten): ${plan.report.duplicatesInFile.length}.\n` +
+        `- Relaciones huérfanas (se importan y se marcan): ${plan.report.danglingRelations.length}.\n\n` +
+        `Solo se insertan registros que no existan ya en la nube. No se modifica nada en este navegador. ¿Continuar?`;
+      if (!window.confirm(summary)) return;
+      const result = await writeRows(plan.rows, auth, { mode: "ignore" });
+      showToast(`Confirmado por Supabase: ${result.inserted} nuevos y ${result.skipped} ya existían en la nube.`);
+    } catch (error) {
+      showToast(
+        `${error.message || "No se pudo importar la copia."} Este navegador no se ha modificado. Si se interrumpió, repite la importación: no duplica registros.`,
+        "error",
+      );
+    }
+  };
+  input.click();
+}
+
 function showToast(message, kind = "success") {
   const toast = document.querySelector("#toast");
   if (!toast) return;
@@ -2072,6 +2265,47 @@ function keyValues(rows) {
 
 function relatedPanel(title, body) {
   return `<article class="panel compact-panel"><div class="panel-header"><h3>${title}</h3></div><div class="stack-list">${body}</div></article>`;
+}
+
+// Agenda comercial del dashboard: próximas acciones por prospecto, tareas
+// vencidas y propuestas enviadas pendientes de respuesta. Usa solo datos del estado.
+function renderCommercialAgenda(currentState) {
+  const now = Date.now();
+  const open = (currentState.leads || []).filter((lead) => !["Cliente ganado", "Perdido"].includes(lead.status));
+  const actions = open
+    .filter((lead) => lead.nextAction || lead.nextActionAt)
+    .sort((a, b) => new Date(a.nextActionAt || 0) - new Date(b.nextActionAt || 0))
+    .slice(0, 6);
+  const overdueTasks = (currentState.tasks || []).filter((task) => task.status !== "Completada" && task.dueDate && new Date(task.dueDate).getTime() < now);
+  const sentProposals = (currentState.proposals || []).filter((proposal) => proposal.status === "Enviada").slice(0, 5);
+  const leadName = (id) => escapeHtml(currentState.leads.find((lead) => lead.id === id)?.companyName || "Sin prospecto");
+
+  return `
+    <section class="two-column commercial-agenda">
+      <article class="panel">
+        <div class="panel-header"><h3>Próximas acciones</h3><span class="muted">${open.length} prospectos abiertos</span></div>
+        ${actions.map((lead) => `
+          <div class="mini-item">
+            <strong>${escapeHtml(lead.companyName)}</strong>
+            <span>${escapeHtml(lead.nextAction || "Sin acción definida")}${lead.nextActionAt ? ` · ${formatDateTime(lead.nextActionAt)}` : ""}</span>
+          </div>`).join("") || emptyText("Sin próximas acciones definidas")}
+      </article>
+      <article class="panel">
+        <div class="panel-header"><h3>Pendientes</h3><span class="muted">${overdueTasks.length} tareas vencidas</span></div>
+        ${overdueTasks.slice(0, 5).map((task) => `
+          <div class="mini-item">
+            <strong>${escapeHtml(task.title || "Tarea")}</strong>
+            <span>Vencida ${formatDate(task.dueDate)}</span>
+          </div>`).join("")}
+        <h4>Propuestas enviadas sin respuesta</h4>
+        ${sentProposals.map((proposal) => `
+          <div class="mini-item">
+            <strong>${leadName(proposal.relatedLeadId)} · ${escapeHtml(proposal.plan || "")}</strong>
+            <span>${formatCurrency(proposal.price)} · caduca ${formatDate(proposal.expiresAt)}</span>
+          </div>`).join("") || emptyText("Sin propuestas pendientes")}
+      </article>
+    </section>
+  `;
 }
 
 function renderProposalMini(proposal) {

@@ -17,30 +17,92 @@ const STORAGE_KEY = "legalprevent-crm-v1";
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-export function loadState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+// Si el estado local no se puede leer o no se puede copiar antes de reemplazarlo,
+// la persistencia queda bloqueada: nunca se sobrescribe lo que no se ha conservado.
+let persistenceBlocked = "";
+
+const seedDemo = () => {
+  const seeded = clone(demoData);
+  seeded.meta = { seededAt: new Date().toISOString(), version: 1 };
+  return seeded;
+};
+
+const defaultStorage = () => {
+  try {
+    return globalThis.localStorage || null;
+  } catch {
+    return null;
+  }
+};
+
+// Copia el contenido bruto en una clave aparte antes de cualquier reemplazo.
+// Devuelve la clave de la copia o null si no se pudo escribir.
+export function backupRawState(storage, raw, reason) {
+  if (!storage || typeof raw !== "string") return null;
+  const key = `${STORAGE_KEY}-${reason}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  try {
+    storage.setItem(key, raw);
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+export function loadState(storage = defaultStorage()) {
+  let raw = null;
+  try {
+    raw = storage ? storage.getItem(STORAGE_KEY) : null;
+  } catch (error) {
+    persistenceBlocked = "No se puede acceder al almacenamiento local del navegador.";
+    console.warn(persistenceBlocked, error);
+    return seedDemo();
+  }
+
   if (!raw) {
-    const seeded = clone(demoData);
-    seeded.meta = {
-      seededAt: new Date().toISOString(),
-      version: 1,
-    };
-    saveState(seeded);
+    const seeded = seedDemo();
+    saveState(seeded, storage);
     return seeded;
   }
 
   try {
     return JSON.parse(raw);
   } catch (error) {
-    console.warn("No se pudo leer el estado local. Se restauran datos demo.", error);
-    const seeded = clone(demoData);
-    saveState(seeded);
+    const copyKey = backupRawState(storage, raw, "corrupto");
+    if (!copyKey) {
+      persistenceBlocked = "El estado local está dañado y no se ha podido copiar. No se sobrescribe.";
+      console.warn(persistenceBlocked, error);
+      return seedDemo();
+    }
+    console.warn(`Estado local ilegible. Copia conservada en ${copyKey}. Se cargan datos demo.`, error);
+    const seeded = seedDemo();
+    saveState(seeded, storage);
     return seeded;
   }
 }
 
-export function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+export function isPersistenceBlocked() {
+  return persistenceBlocked;
+}
+
+// Oyentes: la sincronización con la nube y los avisos visibles se conectan aquí,
+// así que cada guardado local pasa por el mismo punto.
+let savedListener = null;
+let saveErrorListener = null;
+export function onStateSaved(listener) { savedListener = listener; }
+export function onStateSaveError(listener) { saveErrorListener = listener; }
+
+export function saveState(state, storage = defaultStorage()) {
+  try {
+    if (persistenceBlocked) {
+      throw new Error(`Guardado bloqueado: ${persistenceBlocked}`);
+    }
+    if (!storage) throw new Error("No hay almacenamiento local disponible.");
+    storage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    saveErrorListener?.(error);
+    throw error;
+  }
+  savedListener?.(state);
 }
 
 export function createBackup(state) {
@@ -60,14 +122,110 @@ export function importBackup(backup) {
   return nextState;
 }
 
-export function resetState() {
-  const seeded = clone(demoData);
-  seeded.meta = {
-    seededAt: new Date().toISOString(),
-    version: 1,
-  };
-  saveState(seeded);
+// Restaurar demo sustituye todo el estado local. Antes se guarda una copia del
+// contenido actual; si la copia falla, la operación se cancela.
+export function resetState(storage = defaultStorage()) {
+  let currentRaw = null;
+  try {
+    currentRaw = storage ? storage.getItem(STORAGE_KEY) : null;
+  } catch (error) {
+    throw new Error("No se puede leer el estado actual; restauración cancelada.");
+  }
+  if (currentRaw) {
+    const copyKey = backupRawState(storage, currentRaw, "antes-restaurar-demo");
+    if (!copyKey) throw new Error("No se pudo crear la copia previa; restauración cancelada.");
+  }
+  persistenceBlocked = "";
+  const seeded = seedDemo();
+  saveState(seeded, storage);
   return seeded;
+}
+
+// ---- Eliminación segura de datos demo ----
+// Un registro es demo solo si su id existe en demoData y no tiene vínculo real
+// (Supabase o Stripe). Cualquier alta hecha a mano se considera real.
+const DEMO_COLLECTIONS = ["leads", "clients", "tasks", "interactions", "proposals", "documents", "payments", "notes", "activityLog"];
+
+export function demoRecordIds(source = demoData) {
+  const ids = new Set();
+  for (const key of DEMO_COLLECTIONS) {
+    for (const item of source[key] || []) if (item?.id) ids.add(item.id);
+  }
+  return ids;
+}
+
+export function hasRealLink(record) {
+  return Boolean(
+    record?.dataOrigin === "supabase" || record?.externalSource === "supabase" || record?.supabaseId ||
+    record?.dataOrigin === "stripe" || record?.stripeCustomerId || record?.stripeSubscriptionId
+  );
+}
+
+export function isDemoRecord(record, demoIds = demoRecordIds()) {
+  if (!record) return false;
+  if (hasRealLink(record)) return false;
+  if (record.isDemo === true) return true;
+  return demoIds.has(record.id);
+}
+
+// Devuelve el estado sin registros demo y con sus dependientes. Un elemento
+// dependiente se elimina solo si TODOS sus padres han sido eliminados, así que
+// los registros reales y los huérfanos desconocidos se conservan.
+export function removeDemoRecords(state) {
+  const demoIds = demoRecordIds();
+  const isDemo = (record) => isDemoRecord(record, demoIds);
+  const removed = new Set();
+  const removedCounts = {};
+  const keepUnless = (list, parentsOf, key) => {
+    const kept = [];
+    let count = 0;
+    for (const item of list || []) {
+      const parents = parentsOf(item);
+      const allParentsGone = parents.length > 0 && parents.every((ref) => removed.has(ref));
+      if (allParentsGone) {
+        count += 1;
+      } else {
+        kept.push(item);
+      }
+    }
+    removedCounts[key] = count;
+    return kept;
+  };
+
+  const demoLeads = (state.leads || []).filter(isDemo);
+  const demoClients = (state.clients || []).filter(isDemo);
+  for (const lead of demoLeads) removed.add(`lead:${lead.id}`);
+  for (const client of demoClients) removed.add(`client:${client.id}`);
+
+  const next = { ...state };
+  next.leads = (state.leads || []).filter((lead) => !isDemo(lead));
+  next.clients = (state.clients || []).filter((client) => !isDemo(client));
+  removedCounts.leads = demoLeads.length;
+  removedCounts.clients = demoClients.length;
+
+  const relatedRef = (item, typeField, idField) => (item[typeField] && item[idField] ? [`${item[typeField]}:${item[idField]}`] : []);
+  next.tasks = keepUnless(state.tasks, (t) => relatedRef(t, "relatedType", "relatedId"), "tasks");
+  next.interactions = keepUnless(state.interactions, (i) => relatedRef(i, "relatedType", "relatedId"), "interactions");
+  next.documents = keepUnless(state.documents, (d) => relatedRef(d, "relatedType", "relatedId"), "documents");
+  next.activityLog = keepUnless(state.activityLog, (a) => relatedRef(a, "entityType", "entityId"), "activityLog");
+  next.payments = keepUnless(state.payments, (p) => (p.clientId ? [`client:${p.clientId}`] : []), "payments");
+  next.proposals = keepUnless(
+    state.proposals,
+    (p) => [p.relatedLeadId && `lead:${p.relatedLeadId}`, p.relatedClientId && `client:${p.relatedClientId}`].filter(Boolean),
+    "proposals",
+  );
+  next.alerts = [];
+  return { state: next, removed: removedCounts };
+}
+
+// Copia el estado actual antes de borrar datos demo. Si la copia falla, no se borra nada.
+export function clearDemoRecordsSafely(state, storage = defaultStorage()) {
+  const raw = JSON.stringify(state);
+  const copyKey = backupRawState(storage, raw, "antes-eliminar-demo");
+  if (!copyKey) throw new Error("No se pudo crear la copia previa; eliminación cancelada.");
+  const result = removeDemoRecords(state);
+  saveState(result.state, storage);
+  return { ...result, backupKey: copyKey };
 }
 
 function validateBackupState(nextState) {
@@ -745,7 +903,7 @@ export function logActivity(state, entityType, entityId, action, detail) {
 export function filteredLeads(state, filters) {
   return state.leads.filter((lead) => {
     const query = filters.query?.toLowerCase() || "";
-    const isReal = lead.dataOrigin === "supabase" || lead.externalSource === "supabase" || Boolean(lead.supabaseId);
+    const isReal = !isDemoRecord(lead);
     const matchesQuery =
       !query ||
       lead.companyName.toLowerCase().includes(query) ||
@@ -781,4 +939,20 @@ export function filteredClients(state, filters) {
     const matchesOwner = !filters.ownerId || client.ownerId === filters.ownerId;
     return matchesQuery && matchesStatus && matchesPlan && matchesOwner;
   });
+}
+
+// Estados que Supabase devuelve cuando la retirada queda confirmada en la nube.
+export const CONSENT_WITHDRAWAL_CONFIRMED = new Set(["withdrawn", "not_consented"]);
+
+// Retirada local tras confirmación remota. Solo puede dejar el consentimiento en "retirado":
+// nunca lo restaura, y si el lead ya estaba retirado no cambia la fecha original.
+export function withdrawConsentLocally(state, leadId, at = new Date().toISOString()) {
+  return {
+    ...state,
+    leads: state.leads.map((lead) =>
+      lead.id === leadId
+        ? { ...lead, commercialConsent: false, commercialConsentWithdrawnAt: lead.commercialConsentWithdrawnAt || at }
+        : lead,
+    ),
+  };
 }
