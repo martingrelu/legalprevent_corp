@@ -99,6 +99,7 @@ function agentSetup(opts: { settle?: Record<string, unknown>; reserve?: Record<s
     const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
     if (name === "agent_runtime_config") return ok(CONFIG);
     if (name === "agent_reserve") return ok(opts.reserve ?? { status: "reserved", reservation_id: "pub-1" });
+    if (name === "agent_mark_dispatched") return ok(true);
     if (name === "agent_settle") return ok(opts.settle ?? { status: "settled", cost_eur: 0.0002, alerts_pending: false });
     if (name === "agent_release") return ok({ status: "released" });
     if (name === "agent_track_event") return ok({ ok: true });

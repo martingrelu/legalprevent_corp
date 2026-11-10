@@ -34,6 +34,7 @@ function setup(modelText: string) {
     if (name === "agent_runtime_config") return ok(CONFIG);
     if (name === "agent_lab_whoami") return ok({ admin: token === "jwt-admin", sub: "tester-1" });
     if (name === "agent_reserve" || name === "agent_preview_reserve") return ok({ status: "reserved", reservation_id: "r-1" });
+    if (name === "agent_mark_dispatched") return ok(true);
     if (name === "agent_settle" || name === "agent_preview_settle") return ok({ status: "settled", cost_eur: 0.00005 });
     if (name === "agent_release" || name === "agent_preview_release") return ok({ status: "released" });
     if (name === "agent_track_event") return ok({ ok: true });

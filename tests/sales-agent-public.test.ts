@@ -25,7 +25,7 @@ const env: Record<string, string> = {
 const PUBLIC_RESPONSE_KEYS = ["actions", "reply", "state"];
 
 type Rpc = { name: string; args: any };
-function setup(opts: { config?: Record<string, unknown>; reserve?: string; provider?: ModelProvider } = {}) {
+function setup(opts: { config?: Record<string, unknown>; reserve?: string; markDispatched?: boolean; provider?: ModelProvider } = {}) {
   const rpcs: Rpc[] = [];
   const generated: GenerateRequest[] = [];
   const moderated: string[] = [];
@@ -37,6 +37,7 @@ function setup(opts: { config?: Record<string, unknown>; reserve?: string; provi
     if (name === "agent_runtime_config") return ok({ ...BASE_CONFIG, ...opts.config });
     if (name === "agent_lab_whoami") return ok({ admin: false, sub: null });
     if (name === "agent_reserve") return ok({ status: opts.reserve ?? "reserved", reservation_id: "pub-1" });
+    if (name === "agent_mark_dispatched") return ok(opts.markDispatched ?? true);
     if (name === "agent_settle") return ok({ status: "settled", cost_eur: 0.0003, new_alerts: [] });
     if (name === "agent_release") return ok({ status: "released" });
     if (name === "agent_track_event") return ok({ ok: true });
@@ -130,10 +131,49 @@ test("2b · público ON: usa el presupuesto PÚBLICO y nunca el de pruebas ni el
   assert.equal(response.status, 200);
   assert.equal(s.called("agent_reserve").length, 1);
   assert.equal(s.called("agent_settle").length, 1);
+  assert.deepEqual(s.called("agent_mark_dispatched")[0].args, { p_reservation_id: "pub-1" });
   for (const name of LAB_ONLY_RPCS) assert.equal(s.called(name).length, 0, name);
   const reserve = s.called("agent_reserve")[0].args;
   assert.match(reserve.p_session_id, /^[A-Za-z0-9_-]{16,64}$/);
   assert.ok(reserve.p_max_input_tokens > 0 && reserve.p_max_output_tokens === 400);
+});
+
+test("presupuesto público: un fallo anterior a la generación libera la reserva", async () => {
+  const s = setup({
+    provider: {
+      ...fixedProvider(json("Hola")),
+      moderate: async () => { throw new Error("moderación no disponible"); },
+    },
+  });
+  await handleRequest(visit({ message: "hola" }), s.deps);
+  assert.equal(s.generated.length, 0);
+  assert.equal(s.called("agent_mark_dispatched").length, 0);
+  assert.equal(s.called("agent_release").length, 1);
+});
+
+test("presupuesto público: sin confirmación de la marca no se envía la generación", async () => {
+  const s = setup({ markDispatched: false });
+  await handleRequest(visit({ message: "hola" }), s.deps);
+  assert.equal(s.generated.length, 0);
+  assert.equal(s.called("agent_release").length, 1);
+});
+
+test("presupuesto público: un timeout tras el envío conserva la reserva", async () => {
+  const s = setup({
+    provider: {
+      ...fixedProvider(json("Hola")),
+      generate: ({ signal }) => new Promise((_, reject) => {
+        assert.equal(s.called("agent_mark_dispatched").length, 1, "la marca precede al envío");
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    },
+  });
+  const response = await handleRequest(visit({ message: "hola" }), { ...s.deps, timeoutMs: 5 });
+  assert.equal(response.status, 200);
+  assert.equal(s.generated.length, 1);
+  assert.equal(s.called("agent_release").length, 0);
+  assert.equal(s.called("agent_settle").length, 0);
+  assert.ok(s.called("agent_track_event").some(({ args }) => args.p_event.target === "timeout"));
 });
 
 // 3 ---------------------------------------------------------------------------
@@ -270,7 +310,7 @@ test("10 · fallback correcto: aviso de IA, acciones útiles, estado válido y s
   assert.match(body.reply, /Pyme 79 €\/mes/);
   assert.doesNotMatch(body.reply, /error|boom|excepci|status|timeout/i);
   assert.ok(body.actions.length > 0);
-  assert.equal(s.called("agent_release").length, 1, "la reserva se libera");
+  assert.equal(s.called("agent_release").length, 0, "el consumo después del envío es incierto");
   assert.ok(await verifyState(body.state, SECRET), "el estado sigue siendo válido para continuar");
 
   // Origen no permitido sigue siendo 403 también en público.

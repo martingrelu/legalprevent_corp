@@ -246,6 +246,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
     // Cota superior estricta (no estimación): el coste real nunca supera la reserva.
     const maxInput = maxInputTokens(instructions, input, OUTPUT_SCHEMA);
     let reservation: { status: string; reservation_id?: string };
+    let safetyId: string | undefined;
     try {
       // La reserva va ANTES de cualquier contacto con el proveedor (también la
       // moderación): así el presupuesto y el cupo de llamadas reales lo cubren todo.
@@ -263,6 +264,14 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       try {
         const moderation = await provider.moderate(redacted.text);
         if (moderation.flagged) fallback("moderation");
+        else {
+          safetyId = await safetyIdFor(state.c);
+          // Persistir antes del envío: un timeout o la caída de la función
+          // no deben devolver al saldo un consumo que podría haberse facturado.
+          if (isPublic && await rpc("agent_mark_dispatched", { p_reservation_id: reservation.reservation_id }) !== true) {
+            fallback("provider_error");
+          }
+        }
       } catch (error) {
         fallback(providerFailure(error));
       }
@@ -276,7 +285,7 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
       try {
         generated = await provider.generate({
           model, instructions, input, maxOutputTokens: config.max_output_tokens,
-          promptCacheKey: `lp-agent-${KB.version}`, safetyId: await safetyIdFor(state.c), signal: controller.signal,
+          promptCacheKey: `lp-agent-${KB.version}`, safetyId, signal: controller.signal,
         });
       } catch (error) {
         fallback(controller.signal.aborted ? "timeout" : providerFailure(error));
@@ -284,7 +293,9 @@ export async function handleRequest(request: Request, deps: Deps): Promise<Respo
         clearTimeout(timer);
       }
       if (!generated) {
-        await budget.release(reservation.reservation_id as string, elapsed()).catch(() => {});
+        if (!isPublic) await budget.release(reservation.reservation_id as string, elapsed()).catch(() => {});
+      } else if (isPublic && generated.usageConfirmed === false) {
+        fallback("provider_error");
       } else {
         usage = generated.usage;
         // Lo consumido se paga aunque la salida se rechace.

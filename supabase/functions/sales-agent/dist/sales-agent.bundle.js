@@ -501,7 +501,8 @@ function openaiProvider(options) {
         output: Number(body?.usage?.output_tokens ?? 0),
         reasoning: Number(body?.usage?.output_tokens_details?.reasoning_tokens ?? 0)
       };
-      return { text, usage, meta };
+      const usageConfirmed = Number.isSafeInteger(body?.usage?.input_tokens) && usage.input > 0 && Number.isSafeInteger(body?.usage?.output_tokens) && usage.output >= 0;
+      return { text, usage, usageConfirmed, meta };
     }
   };
 }
@@ -847,6 +848,7 @@ async function handleRequest(request, deps) {
     const input = buildInput(state.t, redacted.text, config.max_history_turns);
     const maxInput = maxInputTokens(instructions, input, OUTPUT_SCHEMA);
     let reservation;
+    let safetyId;
     try {
       reservation = await budget.reserve(maxInput, config.max_output_tokens);
       noteAlerts(reservation);
@@ -869,6 +871,12 @@ async function handleRequest(request, deps) {
       try {
         const moderation = await provider.moderate(redacted.text);
         if (moderation.flagged) fallback("moderation");
+        else {
+          safetyId = await safetyIdFor(state.c);
+          if (isPublic && await rpc("agent_mark_dispatched", { p_reservation_id: reservation.reservation_id }) !== true) {
+            fallback("provider_error");
+          }
+        }
       } catch (error) {
         fallback(providerFailure(error));
       }
@@ -887,7 +895,7 @@ async function handleRequest(request, deps) {
           input,
           maxOutputTokens: config.max_output_tokens,
           promptCacheKey: `lp-agent-${KB.version}`,
-          safetyId: await safetyIdFor(state.c),
+          safetyId,
           signal: controller.signal
         });
       } catch (error) {
@@ -896,8 +904,10 @@ async function handleRequest(request, deps) {
         clearTimeout(timer);
       }
       if (!generated) {
-        await budget.release(reservation.reservation_id, elapsed()).catch(() => {
+        if (!isPublic) await budget.release(reservation.reservation_id, elapsed()).catch(() => {
         });
+      } else if (isPublic && generated.usageConfirmed === false) {
+        fallback("provider_error");
       } else {
         usage = generated.usage;
         try {
