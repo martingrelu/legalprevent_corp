@@ -23,7 +23,7 @@ export type GenerateRequest = {
 // exacto que devuelve el proveedor y si se ha negado a responder. Nunca se
 // guarda el texto de la negativa.
 export type GenerateMeta = { model: string | null; refusal: boolean };
-export type GenerateResult = { text: string; usage: Usage; meta?: GenerateMeta };
+export type GenerateResult = { text: string; usage: Usage; usageConfirmed?: boolean; meta?: GenerateMeta };
 export type ModelProvider = {
   name: string;
   moderate(text: string): Promise<{ flagged: boolean }>;
@@ -183,9 +183,11 @@ export function openaiProvider(options: OpenAIOptions): ModelProvider {
         output: Number(body?.usage?.output_tokens ?? 0),
         reasoning: Number(body?.usage?.output_tokens_details?.reasoning_tokens ?? 0),
       };
+      const usageConfirmed = Number.isSafeInteger(body?.usage?.input_tokens) && usage.input > 0
+        && Number.isSafeInteger(body?.usage?.output_tokens) && usage.output >= 0;
       // Respuesta incompleta (p. ej. max_output_tokens): se devuelve tal cual; el
       // validador la rechazará y lo consumido se liquida igualmente.
-      return { text, usage, meta };
+      return { text, usage, usageConfirmed, meta };
     },
   };
 }

@@ -55,6 +55,7 @@ function setup(opts: {
     if (name === "agent_preview_release") return ok({ status: "released" });
     if (name === "agent_preview_log_turn") return ok(1);
     if (name === "agent_reserve") return ok({ status: "reserved", reservation_id: "pub-1" });
+    if (name === "agent_mark_dispatched") return ok(true);
     if (name === "agent_settle") return ok({ status: "settled", cost_eur: 0.0002 });
     if (name === "agent_release") return ok({ status: "released" });
     if (name === "agent_track_event") return ok({ ok: true });
@@ -277,4 +278,20 @@ test("modo público (PR2d): misma petición segura a OpenAI con el modelo del se
   assert.equal(rpc("agent_settle").length, 1);
   assert.equal(rpc("agent_preview_log_turn").length, 0);
   assert.equal(rpc("agent_preview_reserve").length, 0);
+});
+
+test("modo público: una respuesta sin datos de consumo no liquida la reserva a cero", async () => {
+  const { deps, openai, rpc } = setup({
+    config: { public_enabled: true, default_model: "gpt-6-luna" },
+    response: {
+      status: "completed",
+      output: [{ type: "message", content: [{ type: "output_text", text: goodOutput }] }],
+    },
+  });
+  const response = await handleRequest(ask("¿Cuánto cuesta el Pyme?", "gpt-6-luna", "anon"), deps);
+  assert.equal(response.status, 200);
+  assert.equal(openai.filter(({ url }) => url.endsWith("/responses")).length, 1);
+  assert.equal(rpc("agent_mark_dispatched").length, 1);
+  assert.equal(rpc("agent_release").length, 0);
+  assert.equal(rpc("agent_settle").length, 0);
 });

@@ -35,6 +35,7 @@ function setup() {
     const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
     if (name === "agent_runtime_config") return ok(CONFIG);
     if (name === "agent_reserve") { reserves.push(JSON.parse(String(init.body))); return ok({ status: "reserved", reservation_id: "r" }); }
+    if (name === "agent_mark_dispatched") return ok(true);
     if (name === "agent_settle") return ok({ status: "settled", cost_eur: 0.0001 });
     if (name === "agent_release") return ok({ status: "released" });
     if (name === "agent_track_event") return ok({ ok: true });
